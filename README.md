@@ -8,6 +8,25 @@
 - 起動して画面表示まで約 80ms（素の Win32 ウィンドウを出すだけでも 45〜70ms かかる環境での実測値）
 - 100MB / 127 万行のログを約 0.3 秒で開き、正規表現フィルタは約 80ms
 
+## インストール
+
+[Releases](https://github.com/mazume-tech-club/SakuraEditor2/releases/latest) から `sakura2-setup-<バージョン>.exe` をダウンロードして実行する。
+
+- 導入先: `%LOCALAPPDATA%\Programs\Sakura2`（ユーザー単位。管理者権限は不要）
+- スタートメニューに登録する。デスクトップのショートカットは任意
+- 上書きインストールでそのまま更新できる。起動中の Sakura2 はセットアップが閉じる
+- サイレントインストール: `sakura2-setup-<バージョン>.exe /VERYSILENT /SUPPRESSMSGBOXES`
+
+インストーラーを使わずに、`sakura2.exe` 単体を書き込み可能な好きなフォルダに置いて使ってもよい（自動アップデートは exe を置き換えるので、書き込み権限が必要）。
+
+### アンインストール
+
+「設定 > アプリ > インストールされているアプリ」で Sakura2 を選んで削除する。
+
+- exe、ショートカット、エクスプローラーの右クリックメニューを削除する
+- 設定（`%APPDATA%\Sakura2`）と更新キャッシュ・ログ（`%LOCALAPPDATA%\Sakura2`）は、削除するかどうかを確認する。サイレントアンインストール（`unins000.exe /VERYSILENT`）のときは残す
+- 自動アップデートで新しくなった後も、「インストールされているアプリ」に出るバージョンはインストール時のまま（表示だけの問題）
+
 ## 主な機能
 
 | 機能 | 操作 |
@@ -79,7 +98,7 @@ git tag v0.2.0
 git push origin main --tags
 ```
 
-`.github/workflows/release.yml` がテスト・ビルドし、`sakura2.exe` と `sakura2.exe.sha256` を Release に添付する。
+`.github/workflows/release.yml` がテスト・ビルドし、`sakura2.exe`、`sakura2.exe.sha256`、インストーラー `sakura2-setup-<バージョン>.exe` を Release に添付する。
 
 ## 設定
 
@@ -107,6 +126,12 @@ cargo test
 cargo build --release   # target\release\sakura2.exe
 ```
 
+インストーラー: [Inno Setup 6](https://jrsoftware.org/isinfo.php) を入れて、ビルド後に次を実行する（`dist\sakura2-setup-<バージョン>.exe` ができる）。
+
+```powershell
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.3 installer\sakura2.iss
+```
+
 起動時間の計測: `sakura2.exe --bench-exit` を実行すると `%LOCALAPPDATA%\Sakura2\bench.log` に内訳を追記して終了する。
 
 ## 構成
@@ -121,6 +146,7 @@ cargo build --release   # target\release\sakura2.exe
 | `src/tail.rs` | ファイル追従 |
 | `src/vi/` | Vi エンジン（Scintilla 非依存でテスト可能）、Ex コマンド、ヒント |
 | `src/update.rs` | GitHub Releases からの自動更新（WinHTTP + BCrypt SHA-256） |
+| `installer/sakura2.iss` | インストーラー／アンインストーラー（Inno Setup 6） |
 | `assets/` `tools/make_icon.py` | 桜アイコン（`python tools/make_icon.py` で再生成） |
 | `vendor/` | Scintilla 5.5.7 / Lexilla 5.4.5 のソース（使用部分のみ） |
 
