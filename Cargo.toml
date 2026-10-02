@@ -1,6 +1,6 @@
 [package]
 name = "sakura2"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "高速起動のログ向けテキストエディタ"
 build = "build.rs"
@@ -39,6 +39,7 @@ features = [
 
 [build-dependencies]
 cc = { version = "1", features = ["parallel"] }
+embed-resource = "3"
 
 [profile.release]
 opt-level = 3

@@ -1,5 +1,7 @@
 # Sakura2
 
+<img src="assets/sakura2.png" width="96" alt="Sakura2 アイコン">
+
 さくらエディタ風の、**起動が速い**ログ向けテキストエディタ（Windows 専用）。
 
 - Rust + Win32 API 直叩き、編集部品は [Scintilla](https://www.scintilla.org/) を静的リンク。exe 1 本（約 3MB、VC++ ランタイム不要）
@@ -109,6 +111,7 @@ cargo build --release   # target\release\sakura2.exe
 | `src/tail.rs` | ファイル追従 |
 | `src/vi/` | Vi エンジン（Scintilla 非依存でテスト可能）、Ex コマンド、ヒント |
 | `src/update.rs` | GitHub Releases からの自動更新（WinHTTP + BCrypt SHA-256） |
+| `assets/` `tools/make_icon.py` | 桜アイコン（`python tools/make_icon.py` で再生成） |
 | `vendor/` | Scintilla 5.5.7 / Lexilla 5.4.5 のソース（使用部分のみ） |
 
 ## ライセンス
