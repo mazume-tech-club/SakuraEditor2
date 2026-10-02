@@ -1,0 +1,41 @@
+# v* タグを push すると Windows でビルドし、Releases に sakura2.exe と sha256 を添付する。
+# エディタの自動アップデートはこの 2 ファイルを取得して検証・適用する。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: タグと Cargo.toml のバージョン一致を確認
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+          if ("v$ver" -ne "${{ github.ref_name }}") { throw "タグ ${{ github.ref_name }} と Cargo.toml の v$ver が一致しません" }
+
+      - name: テスト
+        run: cargo test --release
+
+      - name: ビルド
+        run: cargo build --release
+
+      - name: 成果物を作成
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/sakura2.exe dist/sakura2.exe
+          $h = (Get-FileHash dist/sakura2.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path dist/sakura2.exe.sha256 -Value "$h  sakura2.exe" -NoNewline -Encoding ascii
+
+      - name: Release を作成
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/sakura2.exe dist/sakura2.exe.sha256 --title "${{ github.ref_name }}" --generate-notes
