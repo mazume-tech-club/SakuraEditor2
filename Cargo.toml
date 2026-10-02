@@ -1,6 +1,6 @@
 [package]
 name = "sakura2"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "高速起動のログ向けテキストエディタ"
 build = "build.rs"
