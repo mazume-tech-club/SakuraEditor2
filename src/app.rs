@@ -51,6 +51,7 @@ const WM_APP_STARTED: u32 = WM_APP + 4;
 
 const TIMER_COUNT: usize = 1;
 const TIMER_TAIL: usize = 2;
+const TIMER_GREP: usize = 3;
 
 const IDC_TAB: usize = 100;
 const IDC_STATUS: usize = 101;
@@ -104,11 +105,19 @@ mod cmd {
     pub const CHECK_UPDATE: u16 = 40081;
     pub const RESTART: u16 = 40082;
     pub const ABOUT: u16 = 40083;
+    pub const GREP_CLEAR: u16 = 40068;
+    pub const CONTEXT_MENU: u16 = 40074;
     pub const NEXT_TAB: u16 = 40090;
     pub const PREV_TAB: u16 = 40091;
 }
 
 // ---- 状態 ----
+
+/// Ctrl+F の絞り込み表示（一致しない行を隠している状態）
+pub struct Grep {
+    pub pattern: String,
+    pub compiled: Arc<Compiled>,
+}
 
 pub struct FilterLink {
     pub source: u32,
@@ -131,6 +140,7 @@ pub struct Tab {
     pub tail: Option<Tail>,
     pub hl: Highlighter,
     pub link: Option<FilterLink>,
+    pub grep: Option<Grep>,
     pub title: Option<String>,
     /// 読み込み/保存時のファイルサイズ（tail の開始位置）
     pub loaded_len: u64,
@@ -406,7 +416,8 @@ fn build_menu() -> HMENU {
         sub("編集(&E)", edit);
 
         let search = CreatePopupMenu();
-        add(search, cmd::FIND, "検索...\tCtrl+F");
+        add(search, cmd::FIND, "絞り込み検索（一致行だけ表示）...\tCtrl+F");
+        add(search, cmd::GREP_CLEAR, "絞り込みを解除\tEsc");
         add(search, cmd::FIND_NEXT, "次を検索\tF3");
         add(search, cmd::FIND_PREV, "前を検索\tShift+F3");
         add(search, cmd::REPLACE, "置換...\tCtrl+H");
@@ -433,6 +444,7 @@ fn build_menu() -> HMENU {
         add(set, cmd::VI_HINTS, "Vi ヒントを表示（学習用）");
         sep(set);
         add(set, cmd::AUTO_UPDATE, "自動アップデート");
+        add(set, cmd::CONTEXT_MENU, "エクスプローラーの右クリックに「さくらエディタ2 で開く」");
         add(set, cmd::OPEN_CONFIG, "設定ファイルを開く");
         sub("設定(&O)", set);
 
@@ -513,6 +525,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let code = util::hiword(wparam) as u32;
             if (filter::ID_BASE..=filter::ID_END).contains(&id) {
                 app.on_panel(id, code);
+            } else if id == IDC_CMD {
+                if code == EN_CHANGE && app.cmd_mode == CmdMode::Find {
+                    unsafe { SetTimer(hwnd, TIMER_GREP, 200, None) };
+                }
             } else if lparam == 0 || id >= 40000 {
                 app.on_command(id as u16);
             }
@@ -539,6 +555,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     app.update_count();
                 }
                 TIMER_TAIL => app.poll_tail(),
+                TIMER_GREP => {
+                    unsafe { KillTimer(hwnd, TIMER_GREP) };
+                    if app.cmd_mode == CmdMode::Find {
+                        let text = util::get_window_text(app.cmd_edit);
+                        app.apply_grep(&text);
+                    }
+                }
                 _ => {}
             }
             0
@@ -688,9 +711,15 @@ impl App {
                 return;
             }
         }
-        std::thread::spawn(|| {
+        let context_menu = self.cfg.context_menu;
+        std::thread::spawn(move || {
             update::cleanup_old_exe();
             output::cleanup_old();
+            if context_menu {
+                if let Ok(exe) = std::env::current_exe() {
+                    crate::shell::ensure(&exe);
+                }
+            }
         });
         if self.cfg.auto_update {
             self.spawn_update(false);
@@ -816,6 +845,7 @@ impl App {
         check(cmd::VI_MODE, self.cfg.vi_mode);
         check(cmd::VI_HINTS, self.cfg.vi_hints);
         check(cmd::AUTO_UPDATE, self.cfg.auto_update);
+        check(cmd::CONTEXT_MENU, self.cfg.context_menu);
         check(cmd::ENC_UTF8, t.enc == Encoding::Utf8);
         check(cmd::ENC_UTF8BOM, t.enc == Encoding::Utf8Bom);
         check(cmd::ENC_SJIS, t.enc == Encoding::Sjis);
@@ -886,6 +916,7 @@ impl App {
             tail: None,
             hl: Highlighter::default(),
             link: None,
+            grep: None,
             title: None,
             loaded_len: 0,
             margin_digits: usize::MAX,
@@ -1270,12 +1301,37 @@ impl App {
                 sci.call(SCI_SELECTALL, 0, 0);
             }
             cmd::FIND => {
+                // 絞り込み中ならその条件、選択中ならその文字列、どちらでもなければ空で開く
                 let sel = sci.sel_text();
-                let pre = if !sel.is_empty() && !sel.contains('\n') { regex::escape(&sel) } else { self.find_pat.clone().unwrap_or_default() };
+                let pre = match &self.tab().grep {
+                    Some(g) => g.pattern.clone(),
+                    None if !sel.is_empty() && !sel.contains('\n') => regex::escape(&sel),
+                    None => String::new(),
+                };
                 self.open_cmdline(CmdMode::Find, &pre);
+                if !pre.is_empty() {
+                    self.apply_grep(&pre);
+                }
+            }
+            cmd::GREP_CLEAR => self.clear_grep(),
+            cmd::CONTEXT_MENU => {
+                self.cfg.context_menu = !self.cfg.context_menu;
+                self.cfg.save();
+                if self.cfg.context_menu {
+                    let ok = std::env::current_exe().map(|e| crate::shell::register(&e)).unwrap_or(false);
+                    self.msg(if ok {
+                        "右クリックメニューに「さくらエディタ2 で開く」を追加しました（Windows 11 は「その他のオプションを確認」の中）"
+                    } else {
+                        "⚠ 右クリックメニューの登録に失敗しました"
+                    });
+                } else {
+                    crate::shell::unregister();
+                    self.msg("右クリックメニューから削除しました");
+                }
             }
             cmd::FIND_NEXT | cmd::FIND_PREV => {
-                if let Some(p) = self.find_pat.clone() {
+                let pat = self.tab().grep.as_ref().map(|g| g.pattern.clone()).or_else(|| self.find_pat.clone());
+                if let Some(p) = pat {
                     self.find(&p, id == cmd::FIND_NEXT);
                 } else {
                     self.open_cmdline(CmdMode::Find, "");
@@ -1665,6 +1721,10 @@ impl App {
         if was_clean {
             sci.call(SCI_SETSAVEPOINT, 0, 0);
         }
+        if let Some(g) = &self.tabs[i].grep {
+            let hits = g.compiled.matching_lines(bytes, base_line);
+            hide_except(&sci, base_line, sci.line_count() - 1, hits.iter().map(|h| h.0 as usize));
+        }
         if follow {
             sci.call(SCI_DOCUMENTEND, 0, 0);
             sci.call(SCI_SCROLLCARET, 0, 0);
@@ -1713,6 +1773,78 @@ impl App {
     }
 
     // ---- 検索・置換 ----
+
+    /// Ctrl+F の絞り込み表示。一致しない行を隠し、一致箇所をハイライトする（空なら解除）
+    fn apply_grep(&mut self, pat: &str) {
+        if pat.is_empty() {
+            self.clear_grep();
+            return;
+        }
+        let compiled = match engine::compile(&grep_spec(pat, false)) {
+            Ok(c) => Arc::new(c),
+            Err(e) => {
+                self.msg(&format!("⚠ {e}"));
+                return;
+            }
+        };
+        let sci = self.sci();
+        let t0 = Instant::now();
+        let hits = compiled.matching_lines(sci.bytes(), 0);
+        let total = sci.line_count();
+        if hits.is_empty() {
+            self.show_all_lines();
+            let t = &mut self.tabs[self.cur];
+            t.grep = None;
+            t.hl.set_search(&sci, None);
+            self.msg(&format!("一致する行がありません: {pat}"));
+            return;
+        }
+        unsafe { SendMessageW(sci.hwnd, WM_SETREDRAW, 0, 0) };
+        sci.call(SCI_SHOWLINES, 0, total as isize - 1);
+        hide_except(&sci, 0, total - 1, hits.iter().map(|h| h.0 as usize));
+        unsafe {
+            SendMessageW(sci.hwnd, WM_SETREDRAW, 1, 0);
+            windows_sys::Win32::Graphics::Gdi::InvalidateRect(sci.hwnd, std::ptr::null(), 1);
+        }
+        // キャレットが隠れた行にあれば、近くの一致行へ移す
+        let cur_line = sci.line_of(sci.caret());
+        if sci.call(SCI_GETLINEVISIBLE, cur_line, 0) == 0 {
+            let target = hits.iter().map(|h| h.0 as usize).find(|&l| l >= cur_line).unwrap_or(hits[0].0 as usize);
+            sci.goto(sci.line_start(target));
+        }
+        sci.call(SCI_SCROLLCARET, 0, 0);
+        let re = compiled.highlights.first().map(|(r, _)| r.clone());
+        let t = &mut self.tabs[self.cur];
+        t.hl.set_search(&sci, re);
+        t.grep = Some(Grep { pattern: pat.to_string(), compiled });
+        self.find_pat = Some(pat.to_string());
+        self.msg(&format!(
+            "絞り込み: {} / {} 行 [{} ms]  Esc か空欄 Enter で解除 / Ctrl+Enter で Temp に出力 / F3 で次へ",
+            fmt_num(hits.len()),
+            fmt_num(total),
+            t0.elapsed().as_millis()
+        ));
+        self.update_status();
+    }
+
+    fn show_all_lines(&self) {
+        let sci = self.sci();
+        sci.call(SCI_SHOWLINES, 0, sci.line_count() as isize - 1);
+    }
+
+    fn clear_grep(&mut self) {
+        let sci = self.sci();
+        let had = self.tabs[self.cur].grep.take().is_some();
+        if had {
+            self.show_all_lines();
+            sci.call(SCI_SCROLLCARET, 0, 0);
+        }
+        self.tabs[self.cur].hl.set_search(&sci, None);
+        self.find_pat = None;
+        if had {
+            self.msg("絞り込みを解除しました");
+        }
+    }
 
     fn find(&mut self, pat: &str, forward: bool) {
         self.find_pat = Some(pat.to_string());
@@ -1799,11 +1931,7 @@ impl App {
                 let re = self.vi.search_regex();
                 self.tabs[self.cur].hl.set_search(&sci, re);
             }
-            CmdMode::Find => {
-                if !text.is_empty() {
-                    self.find(&text, true);
-                }
-            }
+            CmdMode::Find => self.apply_grep(&text),
             CmdMode::Replace => {
                 if !text.is_empty() {
                     let cmd = format!("%s/{text}/g");
@@ -1854,6 +1982,7 @@ impl App {
             }
             ExEffect::Set(opt) => self.set_option(&opt),
             ExEffect::NoHighlight => {
+                self.clear_grep();
                 self.tabs[self.cur].hl.set_search(&sci, None);
             }
             ExEffect::Tail => self.toggle_tail(),
@@ -2030,6 +2159,20 @@ impl App {
         let vk = msg.wParam as u16;
         if msg.hwnd == self.cmd_edit && msg.message == WM_KEYDOWN {
             match vk {
+                VK_RETURN if self.cmd_mode == CmdMode::Find && key_down(VK_CONTROL) => {
+                    // Ctrl+Enter: 絞り込み結果を Temp に出力
+                    let text = util::get_window_text(self.cmd_edit);
+                    self.close_cmdline();
+                    if !text.is_empty() {
+                        self.run_filter(grep_spec(&text, self.panel.spec().line_numbers));
+                    }
+                    return true;
+                }
+                VK_ESCAPE if self.cmd_mode == CmdMode::Find => {
+                    self.close_cmdline();
+                    self.clear_grep();
+                    return true;
+                }
                 VK_RETURN => {
                     self.exec_cmdline();
                     return true;
@@ -2057,6 +2200,10 @@ impl App {
         }
         // 抽出結果タブでは Enter でもジャンプ（Vi モードでない場合）
         if !self.cfg.vi_mode {
+            if msg.message == WM_KEYDOWN && vk == VK_ESCAPE && msg.hwnd == self.sci().hwnd && self.tab().grep.is_some() {
+                self.clear_grep();
+                return true;
+            }
             if msg.message == WM_KEYDOWN && vk == VK_ESCAPE && msg.hwnd == self.sci().hwnd && self.panel.visible {
                 self.close_panel();
                 return true;
@@ -2135,5 +2282,35 @@ fn strip_unc(p: &Path) -> PathBuf {
         Some(r) if !r.starts_with("UNC\\") => PathBuf::from(r),
         Some(r) => PathBuf::from(format!(r"\\{}", &r[4..])),
         None => p.to_path_buf(),
+    }
+}
+
+/// Ctrl+F 用の 1 条件フィルタ（大文字を含めば大小を区別 = smartcase）
+fn grep_spec(pat: &str, line_numbers: bool) -> FilterSpec {
+    FilterSpec {
+        patterns: vec![PatternSpec {
+            text: pat.to_string(),
+            regex: true,
+            case_sensitive: pat.chars().any(|c| c.is_uppercase()),
+            ..Default::default()
+        }],
+        line_numbers,
+    }
+}
+
+/// [from, to] の行のうち keep に含まれない行を隠す（keep は昇順）
+fn hide_except(sci: &Sci, from: usize, to: usize, keep: impl Iterator<Item = usize>) {
+    let mut next = from;
+    for l in keep {
+        if l < next || l > to {
+            continue;
+        }
+        if l > next {
+            sci.call(SCI_HIDELINES, next, l as isize - 1);
+        }
+        next = l + 1;
+    }
+    if next <= to {
+        sci.call(SCI_HIDELINES, next, to as isize);
     }
 }

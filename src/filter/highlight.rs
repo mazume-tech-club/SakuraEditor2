@@ -116,46 +116,49 @@ impl Highlighter {
             }
             return;
         }
-        let first = sci.first_visible_doc_line();
-        let last = (first + sci.lines_on_screen() + 2).min(sci.line_count().saturating_sub(1));
-        let key = (first, last, sci.len());
+        // 行の非表示（絞り込み）や折り返しがあっても、実際に見えている行だけを処理する
+        let first_vis = sci.call(SCI_GETFIRSTVISIBLELINE, 0, 0) as usize;
+        let n_vis = sci.lines_on_screen() + 2;
+        let last_line = sci.line_count().saturating_sub(1);
+        let mut lines: Vec<usize> = Vec::with_capacity(n_vis);
+        for v in first_vis..first_vis + n_vis {
+            let l = (sci.call(SCI_DOCLINEFROMVISIBLE, v, 0) as usize).min(last_line);
+            if lines.last() != Some(&l) {
+                lines.push(l);
+            }
+        }
+        let key = (lines.first().copied().unwrap_or(0), lines.last().copied().unwrap_or(0), sci.len());
         if !force && key == self.last {
             return;
         }
         self.last = key;
         self.had_any = true;
-        let start = sci.line_start(first);
-        let end = sci.line_end(last);
-        if end < start {
-            return;
-        }
-        for ind in IND_FILTER_BASE..=IND_SEARCH {
-            sci.call(SCI_SETINDICATORCURRENT, ind, 0);
-            sci.call(SCI_INDICATORCLEARRANGE, start, (end - start) as isize);
-        }
-        let text = sci.range_bytes(start, end).to_vec();
-        for (re, color) in &self.patterns {
-            sci.call(SCI_SETINDICATORCURRENT, IND_FILTER_BASE + color % PALETTE.len(), 0);
-            for m in re.find_iter(&text).take(20_000) {
-                if m.end() > m.start() {
-                    sci.call(SCI_INDICATORFILLRANGE, start + m.start(), (m.end() - m.start()) as isize);
-                }
+        for &line in &lines {
+            let (start, end) = (sci.line_start(line), sci.line_end(line));
+            if end < start {
+                continue;
             }
-        }
-        if let Some(re) = &self.search {
-            sci.call(SCI_SETINDICATORCURRENT, IND_SEARCH, 0);
-            for m in re.find_iter(&text).take(20_000) {
-                if m.end() > m.start() {
-                    sci.call(SCI_INDICATORFILLRANGE, start + m.start(), (m.end() - m.start()) as isize);
-                }
+            for ind in IND_FILTER_BASE..=IND_SEARCH {
+                sci.call(SCI_SETINDICATORCURRENT, ind, 0);
+                sci.call(SCI_INDICATORCLEARRANGE, start, (end - start) as isize);
             }
-        }
-        if self.log_levels {
-            for line in first..=last {
-                let ls = (sci.line_start(line) - start).min(text.len());
-                let le = (sci.line_end(line) - start).min(text.len());
-                let l = &text[ls..le.max(ls)];
-                let (err, warn) = if error_re().is_match(l) { (true, false) } else { (false, warn_re().is_match(l)) };
+            let text = sci.range_bytes(start, end).to_vec();
+            let fill = |ind: usize, re: &Regex| {
+                sci.call(SCI_SETINDICATORCURRENT, ind, 0);
+                for m in re.find_iter(&text).take(2_000) {
+                    if m.end() > m.start() {
+                        sci.call(SCI_INDICATORFILLRANGE, start + m.start(), (m.end() - m.start()) as isize);
+                    }
+                }
+            };
+            for (re, color) in &self.patterns {
+                fill(IND_FILTER_BASE + color % PALETTE.len(), re);
+            }
+            if let Some(re) = &self.search {
+                fill(IND_SEARCH, re);
+            }
+            if self.log_levels {
+                let (err, warn) = if error_re().is_match(&text) { (true, false) } else { (false, warn_re().is_match(&text)) };
                 set_marker(sci, line, MARK_ERROR, err);
                 set_marker(sci, line, MARK_WARN, warn);
             }

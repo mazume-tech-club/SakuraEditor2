@@ -10,6 +10,7 @@ mod lexer_consts;
 mod sci;
 mod sci_buf;
 mod sci_consts;
+mod shell;
 mod tail;
 mod ui;
 mod update;

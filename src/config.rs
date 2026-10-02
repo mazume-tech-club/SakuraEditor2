@@ -20,6 +20,7 @@ pub struct Config {
     pub log_levels: bool,
     pub directwrite: bool,
     pub auto_update: bool,
+    pub context_menu: bool,
     pub update_repo: String,
     pub github_token: String,
     pub window: Option<(i32, i32, i32, i32)>,
@@ -41,6 +42,7 @@ impl Default for Config {
             log_levels: true,
             directwrite: false,
             auto_update: true,
+            context_menu: true,
             update_repo: DEFAULT_REPO.into(),
             github_token: String::new(),
             window: None,
@@ -87,6 +89,7 @@ impl Config {
                 "log_levels" => c.log_levels = b(v),
                 "directwrite" => c.directwrite = b(v),
                 "auto_update" => c.auto_update = b(v),
+                "context_menu" => c.context_menu = b(v),
                 "update_repo" if !v.is_empty() => c.update_repo = v.to_string(),
                 "github_token" => c.github_token = v.to_string(),
                 "maximized" => c.maximized = b(v),
@@ -124,6 +127,7 @@ impl Config {
         s += &format!("font_name={}\nfont_size={}\ntab_width={}\n", self.font_name, self.font_size, self.tab_width);
         s += &format!("json_indent={}\nwrap={}\nline_numbers={}\n", self.json_indent, f(self.wrap), f(self.line_numbers));
         s += &format!("log_levels={}\ndirectwrite={}\n", f(self.log_levels), f(self.directwrite));
+        s += &format!("context_menu={}\n", f(self.context_menu));
         s += &format!("auto_update={}\nupdate_repo={}\ngithub_token={}\n", f(self.auto_update), self.update_repo, self.github_token);
         if let Some((x, y, w, h)) = self.window {
             s += &format!("window={x},{y},{w},{h}\n");
