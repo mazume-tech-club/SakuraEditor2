@@ -82,9 +82,9 @@ BEGIN
     BLOCK "041104B0"
     BEGIN
       VALUE "CompanyName", "mazume-tech-club"
-      VALUE "FileDescription", "Sakura2 - 高速起動のログ向けエディタ"
+      VALUE "FileDescription", "さくらえでぃた弐 - 高速起動のログ向けエディタ"
       VALUE "FileVersion", "{ver}"
-      VALUE "ProductName", "Sakura2"
+      VALUE "ProductName", "さくらえでぃた弐"
       VALUE "ProductVersion", "{ver}"
       VALUE "OriginalFilename", "sakura2.exe"
     END

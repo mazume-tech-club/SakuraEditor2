@@ -1,8 +1,21 @@
-# Sakura2
+# さくらえでぃた弐 (Sakura2)
 
-<img src="assets/sakura2.png" width="96" alt="Sakura2 アイコン">
+<img src="assets/sakura2.png" width="96" alt="さくらえでぃた弐 アイコン">
 
-さくらエディタ風の、**起動が速い**ログ向けテキストエディタ（Windows 専用）。
+サクラエディタの軽さで VSCode のように使える、**起動が速い**ログ向けテキストエディタ（Windows 専用）。
+
+> [!NOTE]
+> 本ソフトは [サクラエディタ](https://sakura-editor.github.io/)（[sakura-editor/sakura](https://github.com/sakura-editor/sakura)）とは**無関係の非公式ソフト**です。本家のソースコードは使っておらず、Rust と Scintilla でゼロから作っています。本家への問い合わせはご遠慮ください。
+
+## なぜ作ったか
+
+サクラエディタは軽快で使いやすく、長年愛用しているすばらしいエディタです。
+ただ、普段 VSCode で使っている JSON 整形（`Alt+Shift+F`）のようなフォーマット機能がなく、ログを絞り込むフィルタ機能も使いづらいと感じていました。
+
+そこで「サクラエディタのように軽くて、VSCode のような感覚で使えるログ向けエディタ」が欲しくなり、作りました。
+名前はサクラエディタへの敬意を込めたものです。
+
+内部の名前（exe・インストール先・設定フォルダ）は `Sakura2` です。
 
 - Rust + Win32 API 直叩き、編集部品は [Scintilla](https://www.scintilla.org/) を静的リンク。exe 1 本（約 3MB、VC++ ランタイム不要）
 - 起動して画面表示まで約 80ms（素の Win32 ウィンドウを出すだけでも 45〜70ms かかる環境での実測値）
@@ -14,14 +27,14 @@
 
 - 導入先: `%LOCALAPPDATA%\Programs\Sakura2`（ユーザー単位。管理者権限は不要）
 - スタートメニューに登録する。デスクトップのショートカットは任意
-- 上書きインストールでそのまま更新できる。起動中の Sakura2 はセットアップが閉じる
+- 上書きインストールでそのまま更新できる。起動中のさくらえでぃた弐はセットアップが閉じる
 - サイレントインストール: `sakura2-setup-<バージョン>.exe /VERYSILENT /SUPPRESSMSGBOXES`
 
 インストーラーを使わずに、`sakura2.exe` 単体を書き込み可能な好きなフォルダに置いて使ってもよい（自動アップデートは exe を置き換えるので、書き込み権限が必要）。
 
 ### アンインストール
 
-「設定 > アプリ > インストールされているアプリ」で Sakura2 を選んで削除する。
+「設定 > アプリ > インストールされているアプリ」で「さくらえでぃた弐」を選んで削除する。
 
 - exe、ショートカット、エクスプローラーの右クリックメニューを削除する
 - 設定（`%APPDATA%\Sakura2`）と更新キャッシュ・ログ（`%LOCALAPPDATA%\Sakura2`）は、削除するかどうかを確認する。サイレントアンインストール（`unins000.exe /VERYSILENT`）のときは残す
@@ -41,7 +54,7 @@
 | Vi チートシート | `F1` |
 | 絞り込み検索（一致行だけ表示＝Grep 表示） | `Ctrl+F`（入力するとその場で絞り込み、`Esc` か空欄で `Enter` で解除、`Ctrl+Enter` で Temp に出力） |
 | 次／前の一致、置換、行移動 | `F3`／`Shift+F3`、`Ctrl+H`、`Ctrl+G` |
-| エクスプローラーの右クリック | 「さくらエディタ2 で開く」（初回起動時に自動登録。設定メニューで ON/OFF。Windows 11 は「その他のオプションを確認」の中） |
+| エクスプローラーの右クリック | 「さくらえでぃた弐 で開く」（初回起動時に自動登録。設定メニューで ON/OFF。Windows 11 は「その他のオプションを確認」の中） |
 
 ### 絞り込み検索（Ctrl+F）
 
@@ -152,4 +165,13 @@ cargo build --release   # target\release\sakura2.exe
 
 ## ライセンス
 
-Scintilla / Lexilla は各ディレクトリの `License.txt` に従う。
+MIT License と Apache License 2.0 のデュアルライセンス。どちらか好きな方を選んで利用できる。
+
+- [LICENSE-MIT](LICENSE-MIT)
+- [LICENSE-APACHE](LICENSE-APACHE)
+
+Copyright (c) 2026 mazume-tech-club
+
+同梱しているサードパーティ製ソフトウェア（Scintilla / Lexilla、Rust クレート）のライセンスは [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) を参照。インストーラーは `LICENSE-*` と `THIRD_PARTY_NOTICES.txt` をインストール先に置く。
+
+特に明示しない限り、このプロジェクトに送られたコントリビューションは、Apache-2.0 ライセンスの定義に従い、追加の条件なしで上記のデュアルライセンスで提供されたものとみなす。

@@ -44,6 +44,9 @@ use crate::util::{self, w};
 use crate::vi::{self, Key, Mode, Vi, ex::ExEffect};
 
 // ---- メッセージ・ID ----
+/// 画面に出す名前。exe・フォルダ・レジストリキーは Sakura2 のまま
+pub const APP_NAME: &str = "さくらえでぃた弐";
+
 const WM_APP_COUNT: u32 = WM_APP + 1;
 const WM_APP_FILTER: u32 = WM_APP + 2;
 const WM_APP_UPDATE: u32 = WM_APP + 3;
@@ -236,7 +239,7 @@ fn trace(started: Instant, label: &'static str) {
 }
 
 fn msgbox(hwnd: HWND, text: &str, flags: MESSAGEBOX_STYLE) -> MESSAGEBOX_RESULT {
-    unsafe { MessageBoxW(hwnd, w(text).as_ptr(), w("Sakura2").as_ptr(), flags) }
+    unsafe { MessageBoxW(hwnd, w(text).as_ptr(), w(APP_NAME).as_ptr(), flags) }
 }
 
 // ---- 起動 ----
@@ -277,7 +280,7 @@ pub fn run(started: Instant) -> i32 {
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
-            w("Sakura2").as_ptr(),
+            w(APP_NAME).as_ptr(),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             x,
             y,
@@ -444,7 +447,7 @@ fn build_menu() -> HMENU {
         add(set, cmd::VI_HINTS, "Vi ヒントを表示（学習用）");
         sep(set);
         add(set, cmd::AUTO_UPDATE, "自動アップデート");
-        add(set, cmd::CONTEXT_MENU, "エクスプローラーの右クリックに「さくらエディタ2 で開く」");
+        add(set, cmd::CONTEXT_MENU, &format!("エクスプローラーの右クリックに「{}」", crate::shell::LABEL));
         add(set, cmd::OPEN_CONFIG, "設定ファイルを開く");
         sub("設定(&O)", set);
 
@@ -990,7 +993,7 @@ impl App {
         let t = self.tab();
         let name = t.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "無題".into());
         let dirty = if t.sci.is_modified() { "*" } else { "" };
-        util::set_window_text(self.hwnd, &format!("{dirty}{name} - Sakura2"));
+        util::set_window_text(self.hwnd, &format!("{dirty}{name} - {APP_NAME}"));
         self.update_tab_label(self.cur);
     }
 
@@ -1319,11 +1322,11 @@ impl App {
                 self.cfg.save();
                 if self.cfg.context_menu {
                     let ok = std::env::current_exe().map(|e| crate::shell::register(&e)).unwrap_or(false);
-                    self.msg(if ok {
-                        "右クリックメニューに「さくらエディタ2 で開く」を追加しました（Windows 11 は「その他のオプションを確認」の中）"
+                    if ok {
+                        self.msg(&format!("右クリックメニューに「{}」を追加しました（Windows 11 は「その他のオプションを確認」の中）", crate::shell::LABEL));
                     } else {
-                        "⚠ 右クリックメニューの登録に失敗しました"
-                    });
+                        self.msg("⚠ 右クリックメニューの登録に失敗しました");
+                    }
                 } else {
                     crate::shell::unregister();
                     self.msg("右クリックメニューから削除しました");
@@ -1398,7 +1401,8 @@ impl App {
             cmd::RESTART => self.restart(),
             cmd::ABOUT => {
                 let text = format!(
-                    "Sakura2 v{}\n\n高速起動のログ向けテキストエディタ\n更新元: https://github.com/{}\n設定: {}\n{}",
+                    "{} v{}\n\n高速起動のログ向けテキストエディタ\nサクラエディタ (sakura-editor) 本家とは無関係の非公式ソフトです\nライセンス: MIT OR Apache-2.0\n\n更新元: https://github.com/{}\n設定: {}\n{}",
+                    APP_NAME,
                     update::current_version(),
                     self.cfg.update_repo,
                     crate::config::path().display(),

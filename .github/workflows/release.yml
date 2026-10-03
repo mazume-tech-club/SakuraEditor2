@@ -54,4 +54,4 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ github.ref_name }}".TrimStart('v')
-          gh release create "${{ github.ref_name }}" dist/sakura2.exe dist/sakura2.exe.sha256 "dist/sakura2-setup-$ver.exe" --title "${{ github.ref_name }}" --generate-notes
+          gh release create "${{ github.ref_name }}" dist/sakura2.exe dist/sakura2.exe.sha256 "dist/sakura2-setup-$ver.exe" THIRD_PARTY_NOTICES.txt --title "${{ github.ref_name }}" --generate-notes

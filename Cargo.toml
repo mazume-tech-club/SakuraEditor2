@@ -3,6 +3,8 @@ name = "sakura2"
 version = "0.1.4"
 edition = "2024"
 description = "高速起動のログ向けテキストエディタ"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mazume-tech-club/SakuraEditor2"
 build = "build.rs"
 
 [dependencies]
