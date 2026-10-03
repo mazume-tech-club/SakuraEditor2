@@ -9,6 +9,15 @@
   #error "/DAppVersion=x.y.z を指定してください (Cargo.toml の version と同じ値)"
 #endif
 
+; VersionInfoVersion は数字 (x.y.z) しか書けないので、0.2.0-rc1 や 0.2.0+build の後ろを落とす
+#define NumVersion AppVersion
+#if Pos("-", NumVersion) > 0
+  #define NumVersion Copy(NumVersion, 1, Pos("-", NumVersion) - 1)
+#endif
+#if Pos("+", NumVersion) > 0
+  #define NumVersion Copy(NumVersion, 1, Pos("+", NumVersion) - 1)
+#endif
+
 #define AppName "Sakura2"
 #define AppExe "sakura2.exe"
 ; src/shell.rs の KEY と同じ。アプリが初回起動時に作る右クリックメニュー
@@ -25,7 +34,8 @@ AppPublisher=mazume-tech-club
 AppPublisherURL=https://github.com/mazume-tech-club/SakuraEditor2
 AppSupportURL=https://github.com/mazume-tech-club/SakuraEditor2/issues
 AppUpdatesURL=https://github.com/mazume-tech-club/SakuraEditor2/releases
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumVersion}
+VersionInfoProductTextVersion={#AppVersion}
 VersionInfoDescription={#AppName} セットアップ
 PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\{#AppName}
