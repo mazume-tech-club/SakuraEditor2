@@ -19,6 +19,8 @@
 #endif
 
 #define AppName "Sakura2"
+; 画面に出す名前 (src/app.rs の APP_NAME と同じ)。フォルダ・レジストリ・設定の場所は AppName (Sakura2) のまま
+#define AppDisplayName "さくらえでぃた弐"
 #define AppExe "sakura2.exe"
 ; src/shell.rs の KEY と同じ。アプリが初回起動時に作る右クリックメニュー
 #define ShellKey "Software\Classes\*\shell\Sakura2"
@@ -27,16 +29,16 @@
 
 [Setup]
 AppId={{B980AE8F-3EC5-4D91-BD49-87B6838A437E}
-AppName={#AppName}
+AppName={#AppDisplayName}
 AppVersion={#AppVersion}
-AppVerName={#AppName} {#AppVersion}
+AppVerName={#AppDisplayName} {#AppVersion}
 AppPublisher=mazume-tech-club
 AppPublisherURL=https://github.com/mazume-tech-club/SakuraEditor2
 AppSupportURL=https://github.com/mazume-tech-club/SakuraEditor2/issues
 AppUpdatesURL=https://github.com/mazume-tech-club/SakuraEditor2/releases
 VersionInfoVersion={#NumVersion}
 VersionInfoProductTextVersion={#AppVersion}
-VersionInfoDescription={#AppName} セットアップ
+VersionInfoDescription={#AppDisplayName} セットアップ
 PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\{#AppName}
 DisableProgramGroupPage=yes
@@ -47,7 +49,7 @@ OutputDir=..\dist
 OutputBaseFilename=sakura2-setup-{#AppVersion}
 SetupIconFile=..\assets\sakura2.ico
 UninstallDisplayIcon={app}\{#AppExe}
-UninstallDisplayName={#AppName}
+UninstallDisplayName={#AppDisplayName}
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
@@ -62,13 +64,21 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE-MIT"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE-APACHE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
+
+[InstallDelete]
+; v0.1.4 以前のショートカット名 (Sakura2.lnk) を消す
+Type: files; Name: "{group}\{#AppName}.lnk"
+Type: files; Name: "{userdesktop}\{#AppName}.lnk"
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
-Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+Name: "{group}\{#AppDisplayName}"; Filename: "{app}\{#AppExe}"
+Name: "{userdesktop}\{#AppDisplayName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppDisplayName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; 自動アップデートが退避した旧 exe
@@ -76,13 +86,13 @@ Type: files; Name: "{app}\sakura2.old.exe"
 Type: dirifempty; Name: "{app}"
 
 [Code]
-// アンインストール前に起動中の Sakura2 を閉じてもらう
+// アンインストール前に起動中のアプリを閉じてもらう
 function InitializeUninstall(): Boolean;
 begin
   Result := True;
   while FindWindowByClassName('{#WindowClass}') <> 0 do
   begin
-    if SuppressibleMsgBox('Sakura2 が起動しています。すべてのウィンドウを閉じてから [再試行] を押してください。',
+    if SuppressibleMsgBox('{#AppDisplayName} が起動しています。すべてのウィンドウを閉じてから [再試行] を押してください。',
                           mbError, MB_RETRYCANCEL, IDCANCEL) = IDCANCEL then
     begin
       Result := False;
