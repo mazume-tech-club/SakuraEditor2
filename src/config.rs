@@ -33,7 +33,7 @@ impl Default for Config {
         Config {
             vi_mode: false,
             vi_hints: true,
-            font_name: "BIZ UDゴシック".into(),
+            font_name: "MS ゴシック".into(),
             font_size: 11,
             tab_width: 4,
             json_indent: 4,

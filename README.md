@@ -119,7 +119,7 @@ git push origin main --tags
 
 | キー | 既定値 | 内容 |
 |------|--------|------|
-| `font_name` / `font_size` | BIZ UDゴシック / 11 | フォント |
+| `font_name` / `font_size` | MS ゴシック / 11 | フォント |
 | `tab_width` | 4 | タブ幅 |
 | `json_indent` | 4 | JSON 整形のインデント（0 でタブ） |
 | `wrap` / `line_numbers` | 0 / 1 | 折り返し／行番号 |

@@ -297,6 +297,10 @@ pub fn run(started: Instant) -> i32 {
         trace(started, "font");
         let tabctl = ui::control(hwnd, hinst, 0, "SysTabControl32", "", WS_VISIBLE | WS_CLIPSIBLINGS | TCS_FOCUSNEVER | TCS_TOOLTIPS, IDC_TAB, font);
         let _ = WC_TABCONTROLW;
+        // 末尾の「＋」は新規タブ用のボタン。実タブは常にこの手前に挿入する
+        let plus = w(" ＋ ");
+        let item = TCITEMW { mask: TCIF_TEXT, pszText: plus.as_ptr() as *mut u16, ..std::mem::zeroed() };
+        SendMessageW(tabctl, TCM_INSERTITEMW, 0, &item as *const _ as LPARAM);
         let status = CreateWindowExW(0, STATUSCLASSNAMEW, std::ptr::null(), WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP, 0, 0, 0, 0, hwnd, IDC_STATUS as HMENU, hinst, std::ptr::null());
         ui::set_font(status, font);
         let cmd_label = ui::control(hwnd, hinst, 0, "STATIC", ":", ui::SS_LEFT, IDC_CMDLABEL, font);
@@ -380,7 +384,7 @@ fn build_menu() -> HMENU {
         };
 
         let file = CreatePopupMenu();
-        add(file, cmd::NEW, "新規作成\tCtrl+N");
+        add(file, cmd::NEW, "新しいタブ\tCtrl+N");
         add(file, cmd::OPEN, "開く...\tCtrl+O");
         add(file, cmd::RELOAD, "再読み込み\tCtrl+R");
         sep(file);
@@ -542,7 +546,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if hdr.hwndFrom == app.tabctl {
                 if hdr.code == TCN_SELCHANGE {
                     let i = unsafe { SendMessageW(app.tabctl, TCM_GETCURSEL, 0, 0) };
-                    if i >= 0 {
+                    if i as usize == app.tabs.len() {
+                        app.new_tab();
+                    } else if i >= 0 {
                         app.activate(i as usize);
                     }
                 }
