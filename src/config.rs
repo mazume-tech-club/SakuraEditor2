@@ -26,6 +26,7 @@ pub struct Config {
     pub window: Option<(i32, i32, i32, i32)>,
     pub maximized: bool,
     pub filter: FilterSpec,
+    pub theme: String,
 }
 
 impl Default for Config {
@@ -48,6 +49,7 @@ impl Default for Config {
             window: None,
             maximized: false,
             filter: FilterSpec::default(),
+            theme: "light".into(),
         }
     }
 }
@@ -92,6 +94,7 @@ impl Config {
                 "context_menu" => c.context_menu = b(v),
                 "update_repo" if !v.is_empty() => c.update_repo = v.to_string(),
                 "github_token" => c.github_token = v.to_string(),
+                "theme" => c.theme = v.to_string(),
                 "maximized" => c.maximized = b(v),
                 "window" => {
                     let n: Vec<i32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
@@ -129,6 +132,7 @@ impl Config {
         s += &format!("log_levels={}\ndirectwrite={}\n", f(self.log_levels), f(self.directwrite));
         s += &format!("context_menu={}\n", f(self.context_menu));
         s += &format!("auto_update={}\nupdate_repo={}\ngithub_token={}\n", f(self.auto_update), self.update_repo, self.github_token);
+        s += &format!("theme={}\n", self.theme);
         if let Some((x, y, w, h)) = self.window {
             s += &format!("window={x},{y},{w},{h}\n");
         }
@@ -160,6 +164,7 @@ mod tests {
     fn round_trip() {
         let mut c = Config::default();
         c.vi_mode = true;
+        c.theme = "dark".into();
         c.window = Some((10, 20, 800, 600));
         c.filter.patterns.push(PatternSpec { text: "a,b=c".into(), exclude: true, regex: true, color: 3, ..Default::default() });
         let back = Config::parse(&c.serialize());

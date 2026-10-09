@@ -38,6 +38,7 @@ use crate::sci::{SCNotification, Sci};
 use crate::sci_buf::SciBuf;
 use crate::sci_consts::*;
 use crate::tail::{self, Tail};
+use crate::theme::{self, Palette};
 use crate::ui;
 use crate::update;
 use crate::util::{self, w};
@@ -115,6 +116,13 @@ mod cmd {
     pub const CONTEXT_MENU: u16 = 40074;
     pub const NEXT_TAB: u16 = 40090;
     pub const PREV_TAB: u16 = 40091;
+    pub const THEME_LIGHT: u16 = 40095;
+    pub const THEME_DARK: u16 = 40096;
+    pub const THEME_EDIT: u16 = 40097;
+    pub const THEME_FOLDER: u16 = 40098;
+    /// カスタムテーマは themes フォルダの一覧順に BASE から連番
+    pub const THEME_CUSTOM_BASE: u16 = 40100;
+    pub const THEME_CUSTOM_END: u16 = 40131;
 }
 
 // ---- 状態 ----
@@ -201,6 +209,8 @@ pub struct App {
     panel: Panel,
     vi: Vi,
     cfg: Config,
+    palette: Palette,
+    theme_menu: HMENU,
     find_pat: Option<String>,
     count_gen: u64,
     started: Instant,
@@ -260,6 +270,7 @@ pub fn run(started: Instant) -> i32 {
         crate::sci::register_classes(hinst);
         trace(started, "sci_register");
         let cfg = Config::load();
+        let palette = Palette::load(&cfg.theme);
         trace(started, "config");
 
         let class = w("Sakura2Main");
@@ -277,7 +288,7 @@ pub fn run(started: Instant) -> i32 {
         };
         RegisterClassExW(&wc);
         trace(started, "register_class");
-        let menu = build_menu();
+        let (menu, theme_menu) = build_menu();
         trace(started, "menu");
         let (x, y, cx, cy) = cfg.window.unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT));
         let hwnd = CreateWindowExW(
@@ -328,6 +339,8 @@ pub fn run(started: Instant) -> i32 {
             panel,
             vi: Vi::new(),
             cfg,
+            palette,
+            theme_menu,
             find_pat: None,
             count_gen: 0,
             started,
@@ -373,7 +386,8 @@ pub fn run(started: Instant) -> i32 {
     }
 }
 
-fn build_menu() -> HMENU {
+/// 戻り値はメニューバーとテーマ用サブメニュー（項目は開くたびに作り直す）
+fn build_menu() -> (HMENU, HMENU) {
     unsafe {
         let bar = CreateMenu();
         let add = |m: HMENU, id: u16, text: &str| {
@@ -447,6 +461,8 @@ fn build_menu() -> HMENU {
         add(view, cmd::LOG_COLORS, "ログレベルの色分け (ERROR/WARN)");
         add(view, cmd::WRAP, "折り返し\tAlt+Z");
         add(view, cmd::LINE_NUMBERS, "行番号");
+        let theme_menu = CreatePopupMenu();
+        AppendMenuW(view, MF_POPUP, theme_menu as usize, w("テーマ(&T)").as_ptr());
         sep(view);
         add(view, cmd::NEXT_TAB, "次のタブ\tCtrl+Tab");
         add(view, cmd::PREV_TAB, "前のタブ\tCtrl+Shift+Tab");
@@ -469,7 +485,7 @@ fn build_menu() -> HMENU {
         add(help, cmd::RESTART, "再起動（更新を適用）");
         add(help, cmd::ABOUT, "バージョン情報");
         sub("ヘルプ(&H)", help);
-        bar
+        (bar, theme_menu)
     }
 }
 
@@ -606,7 +622,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
         WM_INITMENUPOPUP => {
-            app.update_menu_checks(wparam as HMENU);
+            if wparam as HMENU == app.theme_menu {
+                app.update_theme_menu();
+            } else {
+                app.update_menu_checks(wparam as HMENU);
+            }
             0
         }
         WM_DROPFILES => {
@@ -892,6 +912,9 @@ impl App {
         sci.call(SCI_SETMODEVENTMASK, 0, 0);
         sci.call_str(SCI_STYLESETFONT, STYLE_DEFAULT as usize, &c.font_name);
         sci.call(SCI_STYLESETSIZE, STYLE_DEFAULT as usize, c.font_size as isize);
+        let p = &self.palette;
+        sci.call(SCI_STYLESETFORE, STYLE_DEFAULT as usize, util::rgb(p.fg));
+        sci.call(SCI_STYLESETBACK, STYLE_DEFAULT as usize, util::rgb(p.bg));
         sci.call(SCI_STYLECLEARALL, 0, 0);
         sci.call(SCI_SETTABWIDTH, c.tab_width as usize, 0);
         sci.call(SCI_SETUSETABS, 1, 0);
@@ -899,8 +922,11 @@ impl App {
         sci.call(SCI_SETMARGINWIDTHN, 1, 0);
         sci.call(SCI_SETCARETLINEVISIBLE, 1, 0);
         sci.call(SCI_SETCARETLINEVISIBLEALWAYS, 1, 0);
-        sci.call(SCI_SETCARETLINEBACK, util::rgb(0xF2F6FF) as usize, 0);
-        sci.call(SCI_SETSELBACK, 1, util::rgb(0xADD6FF));
+        sci.call(SCI_SETCARETLINEBACK, util::rgb(p.caret_line) as usize, 0);
+        sci.call(SCI_SETSELBACK, 1, util::rgb(p.selection));
+        sci.call(SCI_SETADDITIONALSELBACK, util::rgb(p.selection) as usize, 0);
+        sci.call(SCI_SETCARETFORE, util::rgb(p.caret) as usize, 0);
+        sci.call(SCI_SETADDITIONALCARETFORE, util::rgb(p.caret) as usize, 0);
         sci.call(SCI_SETSCROLLWIDTHTRACKING, 1, 0);
         sci.call(SCI_SETSCROLLWIDTH, 1, 0);
         sci.call(SCI_SETMULTIPLESELECTION, 1, 0);
@@ -908,7 +934,7 @@ impl App {
         sci.call(SCI_SETLAYOUTCACHE, SC_CACHE_PAGE as usize, 0);
         sci.call(SCI_SETENDATLASTLINE, 0, 0);
         sci.call(SCI_SETXCARETPOLICY, 0x05usize, 50);
-        highlight::setup(sci);
+        highlight::setup(sci, p);
         self.apply_caret_style(sci);
     }
 
@@ -932,7 +958,7 @@ impl App {
         let sci = Sci::create(self.hwnd, self.hinst, IDC_SCI_BASE + id as usize);
         self.setup_sci(&sci);
         sci.call(SCI_SETEOLMODE, SC_EOL_CRLF as usize, 0);
-        lang::apply(&sci, Lang::Text);
+        lang::apply(&sci, Lang::Text, &self.palette);
         let mut tab = Tab {
             id,
             sci,
@@ -1148,7 +1174,7 @@ impl App {
         let log_levels = self.cfg.log_levels;
         let t = &mut self.tabs[idx];
         t.sci.call(SCI_SETEOLMODE, match eol { Eol::Crlf => SC_EOL_CRLF, Eol::Lf => SC_EOL_LF, Eol::Cr => SC_EOL_CR } as usize, 0);
-        lang::apply(&t.sci, lang);
+        lang::apply(&t.sci, lang, &self.palette);
         t.sci.load_bytes(&text);
         t.path = Some(p.to_path_buf());
         t.enc = enc;
@@ -1210,13 +1236,16 @@ impl App {
         }
         if lang_changed && t.link.is_none() {
             t.lang = Lang::from_path(&path);
-            lang::apply(&t.sci, t.lang);
+            lang::apply(&t.sci, t.lang, &self.palette);
         }
         self.update_tab_label(idx);
         self.update_title();
         self.msg(&format!("保存しました: {}", path.display()));
         if path == crate::config::path() {
             self.reload_config();
+        } else if path == theme::path(&self.cfg.theme) {
+            let name = self.cfg.theme.clone();
+            self.apply_theme(&name);
         }
         true
     }
@@ -1224,11 +1253,9 @@ impl App {
     fn reload_config(&mut self) {
         let old_vi = self.cfg.vi_mode;
         self.cfg = Config::load();
-        for i in 0..self.tabs.len() {
-            let sci = self.tabs[i].sci;
-            self.setup_sci(&sci);
-            lang::apply(&sci, self.tabs[i].lang);
-            let t = &mut self.tabs[i];
+        self.palette = Palette::load(&self.cfg.theme);
+        self.restyle_all();
+        for t in &mut self.tabs {
             t.margin_digits = usize::MAX;
             Self::update_margin(t, self.cfg.line_numbers);
         }
@@ -1238,11 +1265,70 @@ impl App {
         self.msg("設定を再読み込みしました");
     }
 
+    /// 全タブの Scintilla 設定と配色をやり直す（フォント・テーマ変更後）
+    fn restyle_all(&mut self) {
+        for i in 0..self.tabs.len() {
+            let sci = self.tabs[i].sci;
+            self.setup_sci(&sci);
+            lang::apply(&sci, self.tabs[i].lang, &self.palette);
+        }
+    }
+
+    fn apply_theme(&mut self, name: &str) {
+        if self.cfg.theme != name {
+            self.cfg.theme = name.to_string();
+            self.cfg.save();
+        }
+        self.palette = Palette::load(name);
+        self.restyle_all();
+        self.msg(&format!("テーマ: {name}"));
+    }
+
+    /// テーマを編集用にファイルとして開く。無ければ現在の配色から作る
+    fn edit_theme(&mut self) {
+        let name = match self.cfg.theme.as_str() {
+            "light" | "dark" => "custom",
+            n => n,
+        }
+        .to_string();
+        let path = theme::path(&name);
+        if !path.exists() {
+            if let Err(e) = theme::save_theme(&name, &self.palette) {
+                msgbox(self.hwnd, &format!("テーマを保存できませんでした: {}\n{e}", path.display()), MB_ICONERROR);
+                return;
+            }
+        }
+        self.apply_theme(&name);
+        self.open_path(&path);
+        self.msg(&format!("テーマ {name} を編集中。保存すると即座に反映されます（色は RRGGBB の 16 進）"));
+    }
+
+    fn update_theme_menu(&self) {
+        unsafe {
+            while DeleteMenu(self.theme_menu, 0, MF_BYPOSITION) != 0 {}
+            let add = |id: u16, text: &str, on: bool| {
+                AppendMenuW(self.theme_menu, MF_STRING | if on { MF_CHECKED } else { 0 }, id as usize, w(text).as_ptr());
+            };
+            add(cmd::THEME_LIGHT, "ライト", self.cfg.theme == "light");
+            add(cmd::THEME_DARK, "ダーク", self.cfg.theme == "dark");
+            let customs = Palette::list_custom();
+            if !customs.is_empty() {
+                AppendMenuW(self.theme_menu, MF_SEPARATOR, 0, std::ptr::null());
+            }
+            for (i, name) in customs.iter().take((cmd::THEME_CUSTOM_END - cmd::THEME_CUSTOM_BASE + 1) as usize).enumerate() {
+                add(cmd::THEME_CUSTOM_BASE + i as u16, name, self.cfg.theme == *name);
+            }
+            AppendMenuW(self.theme_menu, MF_SEPARATOR, 0, std::ptr::null());
+            add(cmd::THEME_EDIT, "テーマを編集（ファイルを開く）", false);
+            add(cmd::THEME_FOLDER, "テーマ フォルダを開く", false);
+        }
+    }
+
     fn open_text_tab(&mut self, title: &str, text: &str, lang: Lang) {
         let idx = self.new_tab();
         let t = &mut self.tabs[idx];
         t.title = Some(title.into());
-        lang::apply(&t.sci, lang);
+        lang::apply(&t.sci, lang, &self.palette);
         t.lang = lang;
         t.sci.load_bytes(text.replace('\n', "\r\n").as_bytes());
         t.sci.call(SCI_SETREADONLY, 1, 0);
@@ -1418,6 +1504,16 @@ impl App {
                 let p = crate::config::path();
                 self.open_path(&p);
                 self.msg("設定を編集して保存すると即座に反映されます");
+            }
+            cmd::THEME_LIGHT => self.apply_theme("light"),
+            cmd::THEME_DARK => self.apply_theme("dark"),
+            cmd::THEME_EDIT => self.edit_theme(),
+            cmd::THEME_FOLDER => theme::open_themes_folder(),
+            cmd::THEME_CUSTOM_BASE..=cmd::THEME_CUSTOM_END => {
+                let i = (id - cmd::THEME_CUSTOM_BASE) as usize;
+                if let Some(name) = Palette::list_custom().get(i) {
+                    self.apply_theme(name);
+                }
             }
             cmd::GUIDE => self.open_text_tab("操作ガイド", crate::help::GUIDE, Lang::Text),
             cmd::CHEAT_SHEET => self.open_text_tab("Vi チートシート", vi::hints::CHEAT_SHEET, Lang::Text),
@@ -1654,7 +1750,7 @@ impl App {
         let log_levels = self.cfg.log_levels;
         let t = &mut self.tabs[idx];
         t.sci.call(SCI_SETEOLMODE, SC_EOL_CRLF as usize, 0);
-        lang::apply(&t.sci, Lang::Log);
+        lang::apply(&t.sci, Lang::Log, &self.palette);
         t.lang = Lang::Log;
         t.sci.load_bytes(&r.text);
         t.path = Some(r.out.clone());
@@ -2147,7 +2243,7 @@ impl App {
                     let t = &mut self.tabs[self.cur];
                     if t.lang == Lang::Text {
                         t.lang = Lang::Json;
-                        lang::apply(&sci, Lang::Json);
+                        lang::apply(&sci, Lang::Json, &self.palette);
                     }
                 }
                 self.msg("JSON を整形しました（Alt+Shift+M で 1 行に圧縮）");

@@ -13,6 +13,7 @@ mod sci_buf;
 mod sci_consts;
 mod shell;
 mod tail;
+mod theme;
 mod ui;
 mod update;
 mod util;

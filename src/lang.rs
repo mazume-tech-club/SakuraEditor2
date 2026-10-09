@@ -5,6 +5,7 @@ use std::path::Path;
 use crate::lexer_consts::*;
 use crate::sci::Sci;
 use crate::sci_consts::*;
+use crate::theme::Palette;
 use crate::util::rgb;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -94,16 +95,6 @@ impl Lang {
     }
 }
 
-const FG: u32 = 0x000000;
-const COMMENT: u32 = 0x008000;
-const STRING: u32 = 0xA31515;
-const KEYWORD: u32 = 0x0000FF;
-const TYPE: u32 = 0x2B91AF;
-const NUMBER: u32 = 0x098658;
-const PREPROC: u32 = 0x808080;
-const PROP: u32 = 0x0451A5;
-const ERROR: u32 = 0xE00000;
-
 const CPP_KW: &str = "alignas alignof asm auto bool break case catch char class const constexpr const_cast continue decltype default delete do double dynamic_cast else enum explicit export extern false float for friend goto if inline int long mutable namespace new noexcept nullptr operator private protected public register reinterpret_cast return short signed sizeof static static_assert static_cast struct switch template this thread_local throw true try typedef typeid typename union unsigned using virtual void volatile wchar_t while override final";
 const JS_KW: &str = "abstract any as async await boolean break case catch class const constructor continue debugger declare default delete do else enum export extends false finally for from function get if implements import in instanceof interface let module namespace new null number of package private protected public readonly return set static string super switch symbol this throw true try type typeof undefined var void while with yield";
 const CS_KW: &str = "abstract as async await base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach get goto if implicit in int interface internal is lock long namespace new null object operator out override params private protected public readonly record ref return sbyte sealed set short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using var virtual void volatile when where while yield";
@@ -125,9 +116,11 @@ fn bold(sci: &Sci, id: usize) {
     sci.call(SCI_STYLESETBOLD, id, 1);
 }
 
-/// 文書にレクサーを設定し、配色する（STYLE_DEFAULT のフォントは設定済みであること）
-pub fn apply(sci: &Sci, lang: Lang) {
+/// 文書にレクサーを設定し、配色する（STYLE_DEFAULT のフォント・前景・背景は設定済みであること）
+pub fn apply(sci: &Sci, lang: Lang, palette: &Palette) {
     sci.call(SCI_STYLECLEARALL, 0, 0);
+    sci.call(SCI_STYLESETFORE, STYLE_LINENUMBER as usize, rgb(palette.margin_fg));
+    sci.call(SCI_STYLESETBACK, STYLE_LINENUMBER as usize, rgb(palette.margin_bg));
     let lexer = match lang {
         Lang::Text | Lang::Log => "null",
         Lang::Json => "json",
@@ -152,32 +145,32 @@ pub fn apply(sci: &Sci, lang: Lang) {
     };
     match lang {
         Lang::Json => {
-            style(sci, SCE_JSON_NUMBER, NUMBER);
-            style(sci, SCE_JSON_STRING, STRING);
-            style(sci, SCE_JSON_STRINGEOL, STRING);
-            style(sci, SCE_JSON_PROPERTYNAME, PROP);
-            style(sci, SCE_JSON_ESCAPESEQUENCE, 0xEE0000);
-            style(sci, SCE_JSON_LINECOMMENT, COMMENT);
-            style(sci, SCE_JSON_BLOCKCOMMENT, COMMENT);
-            style(sci, SCE_JSON_KEYWORD, KEYWORD);
-            style(sci, SCE_JSON_LDKEYWORD, KEYWORD);
-            style(sci, SCE_JSON_ERROR, ERROR);
+            style(sci, SCE_JSON_NUMBER, palette.number);
+            style(sci, SCE_JSON_STRING, palette.string);
+            style(sci, SCE_JSON_STRINGEOL, palette.string);
+            style(sci, SCE_JSON_PROPERTYNAME, palette.prop);
+            style(sci, SCE_JSON_ESCAPESEQUENCE, palette.error);
+            style(sci, SCE_JSON_LINECOMMENT, palette.comment);
+            style(sci, SCE_JSON_BLOCKCOMMENT, palette.comment);
+            style(sci, SCE_JSON_KEYWORD, palette.keyword);
+            style(sci, SCE_JSON_LDKEYWORD, palette.keyword);
+            style(sci, SCE_JSON_ERROR, palette.error);
             kw(0, "true false null");
             set_prop(sci, "lexer.json.allow.comments", "1");
             set_prop(sci, "lexer.json.escape.sequence", "1");
         }
         Lang::Cpp | Lang::JavaScript | Lang::CSharp | Lang::Java | Lang::Go => {
             for s in [SCE_C_COMMENT, SCE_C_COMMENTLINE, SCE_C_COMMENTDOC, SCE_C_COMMENTLINEDOC] {
-                style(sci, s, COMMENT);
+                style(sci, s, palette.comment);
             }
-            style(sci, SCE_C_NUMBER, NUMBER);
-            style(sci, SCE_C_WORD, KEYWORD);
-            style(sci, SCE_C_WORD2, TYPE);
+            style(sci, SCE_C_NUMBER, palette.number);
+            style(sci, SCE_C_WORD, palette.keyword);
+            style(sci, SCE_C_WORD2, palette.type_);
             for s in [SCE_C_STRING, SCE_C_CHARACTER, SCE_C_VERBATIM, SCE_C_STRINGRAW, SCE_C_TRIPLEVERBATIM, SCE_C_HASHQUOTEDSTRING] {
-                style(sci, s, STRING);
+                style(sci, s, palette.string);
             }
-            style(sci, SCE_C_PREPROCESSOR, PREPROC);
-            style(sci, SCE_C_REGEX, 0x811F3F);
+            style(sci, SCE_C_PREPROCESSOR, palette.preproc);
+            style(sci, SCE_C_REGEX, palette.regex);
             kw(0, match lang {
                 Lang::Cpp => CPP_KW,
                 Lang::JavaScript => JS_KW,
@@ -187,137 +180,137 @@ pub fn apply(sci: &Sci, lang: Lang) {
             });
         }
         Lang::Python => {
-            style(sci, SCE_P_COMMENTLINE, COMMENT);
-            style(sci, SCE_P_COMMENTBLOCK, COMMENT);
-            style(sci, SCE_P_NUMBER, NUMBER);
+            style(sci, SCE_P_COMMENTLINE, palette.comment);
+            style(sci, SCE_P_COMMENTBLOCK, palette.comment);
+            style(sci, SCE_P_NUMBER, palette.number);
             for s in [SCE_P_STRING, SCE_P_CHARACTER, SCE_P_TRIPLE, SCE_P_TRIPLEDOUBLE, SCE_P_FSTRING, SCE_P_FCHARACTER] {
-                style(sci, s, STRING);
+                style(sci, s, palette.string);
             }
-            style(sci, SCE_P_WORD, KEYWORD);
-            style(sci, SCE_P_CLASSNAME, TYPE);
-            style(sci, SCE_P_DEFNAME, 0x795E26);
-            style(sci, SCE_P_DECORATOR, PREPROC);
+            style(sci, SCE_P_WORD, palette.keyword);
+            style(sci, SCE_P_CLASSNAME, palette.type_);
+            style(sci, SCE_P_DEFNAME, palette.func);
+            style(sci, SCE_P_DECORATOR, palette.preproc);
             kw(0, PY_KW);
         }
         Lang::Rust => {
             for s in [SCE_RUST_COMMENTBLOCK, SCE_RUST_COMMENTLINE, SCE_RUST_COMMENTBLOCKDOC, SCE_RUST_COMMENTLINEDOC] {
-                style(sci, s, COMMENT);
+                style(sci, s, palette.comment);
             }
-            style(sci, SCE_RUST_NUMBER, NUMBER);
-            style(sci, SCE_RUST_WORD, KEYWORD);
-            style(sci, SCE_RUST_WORD2, TYPE);
+            style(sci, SCE_RUST_NUMBER, palette.number);
+            style(sci, SCE_RUST_WORD, palette.keyword);
+            style(sci, SCE_RUST_WORD2, palette.type_);
             for s in [SCE_RUST_STRING, SCE_RUST_STRINGR, SCE_RUST_CHARACTER, SCE_RUST_BYTESTRING] {
-                style(sci, s, STRING);
+                style(sci, s, palette.string);
             }
-            style(sci, SCE_RUST_MACRO, 0x795E26);
-            style(sci, SCE_RUST_LIFETIME, PREPROC);
+            style(sci, SCE_RUST_MACRO, palette.func);
+            style(sci, SCE_RUST_LIFETIME, palette.preproc);
             kw(0, RUST_KW);
             kw(1, RUST_TY);
         }
         Lang::Sql => {
-            style(sci, SCE_SQL_COMMENT, COMMENT);
-            style(sci, SCE_SQL_COMMENTLINE, COMMENT);
-            style(sci, SCE_SQL_COMMENTDOC, COMMENT);
-            style(sci, SCE_SQL_NUMBER, NUMBER);
-            style(sci, SCE_SQL_WORD, KEYWORD);
-            style(sci, SCE_SQL_STRING, STRING);
-            style(sci, SCE_SQL_CHARACTER, STRING);
+            style(sci, SCE_SQL_COMMENT, palette.comment);
+            style(sci, SCE_SQL_COMMENTLINE, palette.comment);
+            style(sci, SCE_SQL_COMMENTDOC, palette.comment);
+            style(sci, SCE_SQL_NUMBER, palette.number);
+            style(sci, SCE_SQL_WORD, palette.keyword);
+            style(sci, SCE_SQL_STRING, palette.string);
+            style(sci, SCE_SQL_CHARACTER, palette.string);
             kw(0, SQL_KW);
         }
         Lang::Html | Lang::Xml => {
-            style(sci, SCE_H_TAG, 0x800000);
-            style(sci, SCE_H_TAGUNKNOWN, 0x800000);
-            style(sci, SCE_H_TAGEND, 0x800000);
-            style(sci, SCE_H_ATTRIBUTE, 0xE50000);
-            style(sci, SCE_H_ATTRIBUTEUNKNOWN, 0xE50000);
-            style(sci, SCE_H_DOUBLESTRING, KEYWORD);
-            style(sci, SCE_H_SINGLESTRING, KEYWORD);
-            style(sci, SCE_H_COMMENT, COMMENT);
-            style(sci, SCE_H_NUMBER, NUMBER);
-            style(sci, SCE_H_ENTITY, PREPROC);
-            style(sci, SCE_H_XMLSTART, PREPROC);
-            style(sci, SCE_H_XMLEND, PREPROC);
-            style(sci, SCE_H_CDATA, PREPROC);
+            style(sci, SCE_H_TAG, palette.tag);
+            style(sci, SCE_H_TAGUNKNOWN, palette.tag);
+            style(sci, SCE_H_TAGEND, palette.tag);
+            style(sci, SCE_H_ATTRIBUTE, palette.attr);
+            style(sci, SCE_H_ATTRIBUTEUNKNOWN, palette.attr);
+            style(sci, SCE_H_DOUBLESTRING, palette.keyword);
+            style(sci, SCE_H_SINGLESTRING, palette.keyword);
+            style(sci, SCE_H_COMMENT, palette.comment);
+            style(sci, SCE_H_NUMBER, palette.number);
+            style(sci, SCE_H_ENTITY, palette.preproc);
+            style(sci, SCE_H_XMLSTART, palette.preproc);
+            style(sci, SCE_H_XMLEND, palette.preproc);
+            style(sci, SCE_H_CDATA, palette.preproc);
         }
         Lang::Css => {
-            style(sci, SCE_CSS_COMMENT, COMMENT);
-            style(sci, SCE_CSS_TAG, 0x800000);
-            style(sci, SCE_CSS_CLASS, 0x800000);
-            style(sci, SCE_CSS_IDENTIFIER, 0xE50000);
-            style(sci, SCE_CSS_VALUE, KEYWORD);
-            style(sci, SCE_CSS_DOUBLESTRING, STRING);
-            style(sci, SCE_CSS_SINGLESTRING, STRING);
+            style(sci, SCE_CSS_COMMENT, palette.comment);
+            style(sci, SCE_CSS_TAG, palette.tag);
+            style(sci, SCE_CSS_CLASS, palette.tag);
+            style(sci, SCE_CSS_IDENTIFIER, palette.attr);
+            style(sci, SCE_CSS_VALUE, palette.keyword);
+            style(sci, SCE_CSS_DOUBLESTRING, palette.string);
+            style(sci, SCE_CSS_SINGLESTRING, palette.string);
         }
         Lang::Markdown => {
             for s in [SCE_MARKDOWN_HEADER1, SCE_MARKDOWN_HEADER2, SCE_MARKDOWN_HEADER3, SCE_MARKDOWN_HEADER4, SCE_MARKDOWN_HEADER5, SCE_MARKDOWN_HEADER6] {
-                style(sci, s, KEYWORD);
+                style(sci, s, palette.keyword);
                 bold(sci, s);
             }
-            style(sci, SCE_MARKDOWN_STRONG1, FG);
+            style(sci, SCE_MARKDOWN_STRONG1, palette.fg);
             bold(sci, SCE_MARKDOWN_STRONG1);
-            style(sci, SCE_MARKDOWN_CODE, STRING);
-            style(sci, SCE_MARKDOWN_CODE2, STRING);
-            style(sci, SCE_MARKDOWN_CODEBK, STRING);
-            style(sci, SCE_MARKDOWN_LINK, 0x0066CC);
-            style(sci, SCE_MARKDOWN_BLOCKQUOTE, COMMENT);
-            style(sci, SCE_MARKDOWN_ULIST_ITEM, 0x800000);
-            style(sci, SCE_MARKDOWN_OLIST_ITEM, 0x800000);
+            style(sci, SCE_MARKDOWN_CODE, palette.string);
+            style(sci, SCE_MARKDOWN_CODE2, palette.string);
+            style(sci, SCE_MARKDOWN_CODEBK, palette.string);
+            style(sci, SCE_MARKDOWN_LINK, palette.link);
+            style(sci, SCE_MARKDOWN_BLOCKQUOTE, palette.comment);
+            style(sci, SCE_MARKDOWN_ULIST_ITEM, palette.tag);
+            style(sci, SCE_MARKDOWN_OLIST_ITEM, palette.tag);
         }
         Lang::Yaml => {
-            style(sci, SCE_YAML_COMMENT, COMMENT);
-            style(sci, SCE_YAML_IDENTIFIER, PROP);
-            style(sci, SCE_YAML_KEYWORD, KEYWORD);
-            style(sci, SCE_YAML_NUMBER, NUMBER);
-            style(sci, SCE_YAML_REFERENCE, PREPROC);
-            style(sci, SCE_YAML_DOCUMENT, PREPROC);
-            style(sci, SCE_YAML_TEXT, STRING);
-            style(sci, SCE_YAML_ERROR, ERROR);
+            style(sci, SCE_YAML_COMMENT, palette.comment);
+            style(sci, SCE_YAML_IDENTIFIER, palette.prop);
+            style(sci, SCE_YAML_KEYWORD, palette.keyword);
+            style(sci, SCE_YAML_NUMBER, palette.number);
+            style(sci, SCE_YAML_REFERENCE, palette.preproc);
+            style(sci, SCE_YAML_DOCUMENT, palette.preproc);
+            style(sci, SCE_YAML_TEXT, palette.string);
+            style(sci, SCE_YAML_ERROR, palette.error);
             kw(0, "true false yes no null on off");
         }
         Lang::Ini => {
-            style(sci, SCE_PROPS_COMMENT, COMMENT);
-            style(sci, SCE_PROPS_SECTION, KEYWORD);
+            style(sci, SCE_PROPS_COMMENT, palette.comment);
+            style(sci, SCE_PROPS_SECTION, palette.keyword);
             bold(sci, SCE_PROPS_SECTION);
-            style(sci, SCE_PROPS_ASSIGNMENT, 0x800000);
-            style(sci, SCE_PROPS_KEY, PROP);
+            style(sci, SCE_PROPS_ASSIGNMENT, palette.tag);
+            style(sci, SCE_PROPS_KEY, palette.prop);
         }
         Lang::Batch => {
-            style(sci, SCE_BAT_COMMENT, COMMENT);
-            style(sci, SCE_BAT_WORD, KEYWORD);
-            style(sci, SCE_BAT_LABEL, 0x800000);
-            style(sci, SCE_BAT_IDENTIFIER, 0xE50000);
-            style(sci, SCE_BAT_COMMAND, 0x795E26);
+            style(sci, SCE_BAT_COMMENT, palette.comment);
+            style(sci, SCE_BAT_WORD, palette.keyword);
+            style(sci, SCE_BAT_LABEL, palette.tag);
+            style(sci, SCE_BAT_IDENTIFIER, palette.attr);
+            style(sci, SCE_BAT_COMMAND, palette.func);
             kw(0, BAT_KW);
         }
         Lang::PowerShell => {
-            style(sci, SCE_POWERSHELL_COMMENT, COMMENT);
-            style(sci, SCE_POWERSHELL_COMMENTSTREAM, COMMENT);
-            style(sci, SCE_POWERSHELL_STRING, STRING);
-            style(sci, SCE_POWERSHELL_CHARACTER, STRING);
-            style(sci, SCE_POWERSHELL_HERE_STRING, STRING);
-            style(sci, SCE_POWERSHELL_NUMBER, NUMBER);
-            style(sci, SCE_POWERSHELL_VARIABLE, 0xE50000);
-            style(sci, SCE_POWERSHELL_KEYWORD, KEYWORD);
-            style(sci, SCE_POWERSHELL_CMDLET, 0x795E26);
+            style(sci, SCE_POWERSHELL_COMMENT, palette.comment);
+            style(sci, SCE_POWERSHELL_COMMENTSTREAM, palette.comment);
+            style(sci, SCE_POWERSHELL_STRING, palette.string);
+            style(sci, SCE_POWERSHELL_CHARACTER, palette.string);
+            style(sci, SCE_POWERSHELL_HERE_STRING, palette.string);
+            style(sci, SCE_POWERSHELL_NUMBER, palette.number);
+            style(sci, SCE_POWERSHELL_VARIABLE, palette.attr);
+            style(sci, SCE_POWERSHELL_KEYWORD, palette.keyword);
+            style(sci, SCE_POWERSHELL_CMDLET, palette.func);
             kw(0, PS_KW);
         }
         Lang::Shell => {
-            style(sci, SCE_SH_COMMENTLINE, COMMENT);
-            style(sci, SCE_SH_NUMBER, NUMBER);
-            style(sci, SCE_SH_WORD, KEYWORD);
-            style(sci, SCE_SH_STRING, STRING);
-            style(sci, SCE_SH_CHARACTER, STRING);
-            style(sci, SCE_SH_SCALAR, 0xE50000);
-            style(sci, SCE_SH_PARAM, 0xE50000);
+            style(sci, SCE_SH_COMMENTLINE, palette.comment);
+            style(sci, SCE_SH_NUMBER, palette.number);
+            style(sci, SCE_SH_WORD, palette.keyword);
+            style(sci, SCE_SH_STRING, palette.string);
+            style(sci, SCE_SH_CHARACTER, palette.string);
+            style(sci, SCE_SH_SCALAR, palette.attr);
+            style(sci, SCE_SH_PARAM, palette.attr);
             kw(0, SH_KW);
         }
         Lang::Diff => {
-            style(sci, SCE_DIFF_COMMENT, COMMENT);
-            style(sci, SCE_DIFF_COMMAND, KEYWORD);
-            style(sci, SCE_DIFF_HEADER, 0x800000);
-            style(sci, SCE_DIFF_POSITION, 0x800080);
-            style(sci, SCE_DIFF_DELETED, 0xC00000);
-            style(sci, SCE_DIFF_ADDED, 0x008000);
+            style(sci, SCE_DIFF_COMMENT, palette.comment);
+            style(sci, SCE_DIFF_COMMAND, palette.keyword);
+            style(sci, SCE_DIFF_HEADER, palette.tag);
+            style(sci, SCE_DIFF_POSITION, palette.diff_pos);
+            style(sci, SCE_DIFF_DELETED, palette.diff_deleted);
+            style(sci, SCE_DIFF_ADDED, palette.diff_added);
         }
         Lang::Text | Lang::Log => {}
     }

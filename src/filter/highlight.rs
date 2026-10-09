@@ -6,6 +6,7 @@ use regex::bytes::Regex;
 
 use crate::sci::Sci;
 use crate::sci_consts::*;
+use crate::theme::Palette;
 use crate::util::rgb;
 
 pub const IND_FILTER_BASE: usize = 8;
@@ -18,7 +19,7 @@ pub const PALETTE: [u32; 8] = [
     0xFF5A5A, 0xFFC107, 0x34C759, 0x40A9FF, 0xAF52DE, 0xFF8A00, 0xFF2D78, 0x00BFA5,
 ];
 
-pub fn setup(sci: &Sci) {
+pub fn setup(sci: &Sci, palette: &Palette) {
     for (i, c) in PALETTE.iter().enumerate() {
         let ind = IND_FILTER_BASE + i;
         sci.call(SCI_INDICSETSTYLE, ind, INDIC_ROUNDBOX);
@@ -28,15 +29,15 @@ pub fn setup(sci: &Sci) {
         sci.call(SCI_INDICSETUNDER, ind, 1);
     }
     sci.call(SCI_INDICSETSTYLE, IND_SEARCH, INDIC_ROUNDBOX);
-    sci.call(SCI_INDICSETFORE, IND_SEARCH, rgb(0xFF9632));
+    sci.call(SCI_INDICSETFORE, IND_SEARCH, rgb(palette.search_ind));
     sci.call(SCI_INDICSETALPHA, IND_SEARCH, 110);
     sci.call(SCI_INDICSETOUTLINEALPHA, IND_SEARCH, 255);
     sci.call(SCI_INDICSETUNDER, IND_SEARCH, 1);
 
     sci.call(SCI_MARKERDEFINE, MARK_ERROR, SC_MARK_BACKGROUND);
-    sci.call(SCI_MARKERSETBACK, MARK_ERROR, rgb(0xFFE3E3));
+    sci.call(SCI_MARKERSETBACK, MARK_ERROR, rgb(palette.mark_error));
     sci.call(SCI_MARKERDEFINE, MARK_WARN, SC_MARK_BACKGROUND);
-    sci.call(SCI_MARKERSETBACK, MARK_WARN, rgb(0xFFF4CC));
+    sci.call(SCI_MARKERSETBACK, MARK_WARN, rgb(palette.mark_warn));
 }
 
 fn error_re() -> &'static Regex {
