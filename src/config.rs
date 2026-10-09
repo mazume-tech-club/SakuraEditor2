@@ -29,6 +29,10 @@ pub struct Config {
     pub theme: String,
     /// 終了時に開いていたタブ（未保存の内容も含む）を次回起動時に復元する。ON のとき終了時の保存確認は出ない
     pub restore_session: bool,
+    /// Tera Term 風: マウスで選択した文字列を自動でクリップボードにコピーする
+    pub auto_copy: bool,
+    /// Tera Term 風: 右クリックでクリップボードを貼り付ける（右クリックメニューは出さない）
+    pub right_click_paste: bool,
 }
 
 impl Default for Config {
@@ -53,6 +57,8 @@ impl Default for Config {
             filter: FilterSpec::default(),
             theme: "light".into(),
             restore_session: true,
+            auto_copy: true,
+            right_click_paste: true,
         }
     }
 }
@@ -99,6 +105,8 @@ impl Config {
                 "github_token" => c.github_token = v.to_string(),
                 "theme" => c.theme = v.to_string(),
                 "restore_session" => c.restore_session = b(v),
+                "auto_copy" => c.auto_copy = b(v),
+                "right_click_paste" => c.right_click_paste = b(v),
                 "maximized" => c.maximized = b(v),
                 "window" => {
                     let n: Vec<i32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
@@ -137,6 +145,7 @@ impl Config {
         s += &format!("context_menu={}\n", f(self.context_menu));
         s += &format!("auto_update={}\nupdate_repo={}\ngithub_token={}\n", f(self.auto_update), self.update_repo, self.github_token);
         s += &format!("theme={}\nrestore_session={}\n", self.theme, f(self.restore_session));
+        s += &format!("auto_copy={}\nright_click_paste={}\n", f(self.auto_copy), f(self.right_click_paste));
         if let Some((x, y, w, h)) = self.window {
             s += &format!("window={x},{y},{w},{h}\n");
         }
@@ -170,6 +179,8 @@ mod tests {
         c.vi_mode = true;
         c.theme = "dark".into();
         c.restore_session = false;
+        c.auto_copy = false;
+        c.right_click_paste = false;
         c.window = Some((10, 20, 800, 600));
         c.filter.patterns.push(PatternSpec { text: "a,b=c".into(), exclude: true, regex: true, color: 3, ..Default::default() });
         let back = Config::parse(&c.serialize());

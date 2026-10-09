@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     COLOR_BTNFACE, DeleteObject, FillRect, GetSysColorBrush, HDC, HFONT, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME,
     RDW_INVALIDATE, RedrawWindow, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
@@ -16,7 +16,8 @@ use windows_sys::Win32::UI::Controls::Dialogs::{
 };
 use windows_sys::Win32::UI::Controls::{
     EM_SETSEL, NMHDR, SB_SETPARTS, SB_SETTEXTW, SBARS_SIZEGRIP, STATUSCLASSNAMEW, TCIF_PARAM, TCIF_TEXT,
-    TCITEMW, TCM_DELETEITEM, TCM_GETCURSEL, TCM_INSERTITEMW, TCM_SETCURSEL, TCM_SETITEMW, TCN_SELCHANGE,
+    TCHITTESTINFO, TCITEMW, TCM_DELETEITEM, TCM_GETCURSEL, TCM_GETITEMRECT, TCM_HITTEST, TCM_INSERTITEMW, TCM_SETCURSEL,
+    TCM_SETITEMW, TCN_SELCHANGE,
     TCS_FOCUSNEVER, TCS_TOOLTIPS, WC_TABCONTROLW,
 };
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
@@ -58,6 +59,9 @@ const WM_APP_FILTER: u32 = WM_APP + 2;
 const WM_APP_UPDATE: u32 = WM_APP + 3;
 const WM_APP_STARTED: u32 = WM_APP + 4;
 const WM_APP_DPI_DONE: u32 = WM_APP + 5;
+
+/// タブ右端の「×」のクリック判定幅（96 DPI 時の px）
+const TAB_CLOSE_W: i32 = 18;
 
 const TIMER_COUNT: usize = 1;
 const TIMER_TAIL: usize = 2;
@@ -121,6 +125,8 @@ mod cmd {
     pub const SELECT_ALL_MATCHES: u16 = 40054;
     pub const CONTEXT_MENU: u16 = 40074;
     pub const RESTORE_SESSION: u16 = 40075;
+    pub const AUTO_COPY: u16 = 40076;
+    pub const RIGHT_CLICK_PASTE: u16 = 40077;
     pub const NEXT_TAB: u16 = 40090;
     pub const PREV_TAB: u16 = 40091;
     pub const THEME_LIGHT: u16 = 40095;
@@ -491,6 +497,9 @@ fn build_menu() -> (HMENU, HMENU) {
         add(set, cmd::VI_MODE, "Vi モード\tCtrl+Alt+V");
         add(set, cmd::VI_HINTS, "Vi ヒントを表示（学習用）");
         sep(set);
+        add(set, cmd::AUTO_COPY, "選択で自動コピー（Tera Term 風）");
+        add(set, cmd::RIGHT_CLICK_PASTE, "右クリックで貼り付け（Tera Term 風）");
+        sep(set);
         add(set, cmd::RESTORE_SESSION, "終了時の状態を次回起動時に復元（終了時に保存確認を出さない）");
         add(set, cmd::AUTO_UPDATE, "自動アップデート");
         add(set, cmd::CONTEXT_MENU, &format!("エクスプローラーの右クリックに「{}」", crate::shell::LABEL));
@@ -767,6 +776,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 
 unsafe extern "system" fn tab_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
     if let Some(app) = app_opt() {
+        let (x, y) = (util::loword(lparam as usize) as i16 as i32, util::hiword(lparam as usize) as i16 as i32);
+        match msg {
+            WM_LBUTTONDOWN => {
+                if let Some(i) = app.tab_close_hit(x, y) {
+                    app.close_tab(i, false);
+                    return 0;
+                }
+            }
+            WM_MBUTTONDOWN => {
+                if let Some(i) = app.tab_hit(x, y) {
+                    app.close_tab(i, false);
+                    return 0;
+                }
+            }
+            _ => {}
+        }
         if app.dark {
             match msg {
                 WM_ERASEBKGND => return 1,
@@ -779,6 +804,31 @@ unsafe extern "system" fn tab_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
     }
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// Tera Term 風のマウス操作: 選択し終えたら自動コピー、右クリックで貼り付け
+unsafe extern "system" fn sci_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
+    let Some(sci) = app_opt().and_then(|a| a.tabs.iter().find(|t| t.sci.hwnd == hwnd).map(|t| t.sci)) else {
+        return unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+    };
+    let app = app_opt().unwrap();
+    match msg {
+        WM_LBUTTONUP if app.cfg.auto_copy => {
+            let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+            if sci.call(SCI_GETSELECTIONEMPTY, 0, 0) == 0 {
+                sci.call(SCI_COPY, 0, 0);
+            }
+            r
+        }
+        WM_RBUTTONDOWN if app.cfg.right_click_paste => {
+            if sci.call(SCI_CANPASTE, 0, 0) != 0 {
+                sci.call(SCI_PASTE, 0, 0);
+            }
+            0
+        }
+        WM_RBUTTONUP | WM_CONTEXTMENU if app.cfg.right_click_paste => 0,
+        _ => unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) },
+    }
 }
 
 unsafe extern "system" fn status_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
@@ -998,6 +1048,8 @@ impl App {
         check(cmd::AUTO_UPDATE, self.cfg.auto_update);
         check(cmd::CONTEXT_MENU, self.cfg.context_menu);
         check(cmd::RESTORE_SESSION, self.cfg.restore_session);
+        check(cmd::AUTO_COPY, self.cfg.auto_copy);
+        check(cmd::RIGHT_CLICK_PASTE, self.cfg.right_click_paste);
         check(cmd::ENC_UTF8, t.enc == Encoding::Utf8);
         check(cmd::ENC_UTF8BOM, t.enc == Encoding::Utf8Bom);
         check(cmd::ENC_SJIS, t.enc == Encoding::Sjis);
@@ -1061,6 +1113,7 @@ impl App {
         let id = self.next_id;
         self.next_id += 1;
         let sci = Sci::create(self.hwnd, self.hinst, IDC_SCI_BASE + id as usize);
+        unsafe { SetWindowSubclass(sci.hwnd, Some(sci_proc), 1, 0) };
         if self.dark {
             chrome::style_child(sci.hwnd, Kind::Scintilla, true);
         }
@@ -1133,7 +1186,23 @@ impl App {
             .unwrap_or_else(|| "無題".into());
         let dirty = if t.sci.is_modified() { "*" } else { "" };
         let tail = if t.tail.is_some() { " ⟳" } else { "" };
-        format!("{dirty}{name}{tail}")
+        // 末尾の × は閉じるボタン。クリック判定は tab_proc で項目の右端 TAB_CLOSE_W px を見る
+        format!("{dirty}{name}{tail}  ×")
+    }
+
+    /// タブ上の座標が「閉じる ×」の範囲なら、そのタブ番号を返す
+    fn tab_close_hit(&self, x: i32, y: i32) -> Option<usize> {
+        let i = self.tab_hit(x, y)?;
+        let mut rc: RECT = unsafe { std::mem::zeroed() };
+        unsafe { SendMessageW(self.tabctl, TCM_GETITEMRECT, i, &mut rc as *mut _ as LPARAM) };
+        (x >= rc.right - ui::scale(TAB_CLOSE_W, self.dpi)).then_some(i)
+    }
+
+    /// タブ上の座標にある実タブ（「＋」は除く）の番号
+    fn tab_hit(&self, x: i32, y: i32) -> Option<usize> {
+        let mut ht = TCHITTESTINFO { pt: POINT { x, y }, flags: 0 };
+        let i = unsafe { SendMessageW(self.tabctl, TCM_HITTEST, 0, &mut ht as *mut _ as LPARAM) };
+        (i >= 0 && (i as usize) < self.tabs.len()).then_some(i as usize)
     }
 
     fn update_tab_label(&self, i: usize) {
@@ -1717,6 +1786,16 @@ impl App {
             cmd::VI_MODE => self.set_vi(!self.cfg.vi_mode),
             cmd::VI_HINTS => {
                 self.cfg.vi_hints = !self.cfg.vi_hints;
+            }
+            cmd::AUTO_COPY => {
+                self.cfg.auto_copy = !self.cfg.auto_copy;
+                self.cfg.save();
+                self.msg(if self.cfg.auto_copy { "選択で自動コピー: 有効" } else { "選択で自動コピー: 無効" });
+            }
+            cmd::RIGHT_CLICK_PASTE => {
+                self.cfg.right_click_paste = !self.cfg.right_click_paste;
+                self.cfg.save();
+                self.msg(if self.cfg.right_click_paste { "右クリックで貼り付け: 有効" } else { "右クリックで貼り付け: 無効（右クリックメニューを表示）" });
             }
             cmd::RESTORE_SESSION => {
                 self.cfg.restore_session = !self.cfg.restore_session;
