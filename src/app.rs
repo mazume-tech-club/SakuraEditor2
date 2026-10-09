@@ -41,6 +41,7 @@ use crate::lang::{self, Lang};
 use crate::sci::{SCNotification, Sci};
 use crate::sci_buf::SciBuf;
 use crate::sci_consts::*;
+use crate::session;
 use crate::tail::{self, Tail};
 use crate::theme::{self, Palette};
 use crate::ui;
@@ -56,6 +57,7 @@ const WM_APP_COUNT: u32 = WM_APP + 1;
 const WM_APP_FILTER: u32 = WM_APP + 2;
 const WM_APP_UPDATE: u32 = WM_APP + 3;
 const WM_APP_STARTED: u32 = WM_APP + 4;
+const WM_APP_DPI_DONE: u32 = WM_APP + 5;
 
 const TIMER_COUNT: usize = 1;
 const TIMER_TAIL: usize = 2;
@@ -118,6 +120,7 @@ mod cmd {
     pub const ADD_NEXT_MATCH: u16 = 40053;
     pub const SELECT_ALL_MATCHES: u16 = 40054;
     pub const CONTEXT_MENU: u16 = 40074;
+    pub const RESTORE_SESSION: u16 = 40075;
     pub const NEXT_TAB: u16 = 40090;
     pub const PREV_TAB: u16 = 40091;
     pub const THEME_LIGHT: u16 = 40095;
@@ -162,7 +165,7 @@ pub struct Tab {
     pub title: Option<String>,
     /// 読み込み/保存時のファイルサイズ（tail の開始位置）
     pub loaded_len: u64,
-    margin_digits: usize,
+    margin_width: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -371,6 +374,10 @@ pub fn run(started: Instant) -> i32 {
         }
         app.new_tab();
         trace(started, "first_tab");
+        if app.cfg.restore_session {
+            app.restore_session();
+            trace(started, "session");
+        }
         for f in &files {
             app.open_path(f);
         }
@@ -484,6 +491,7 @@ fn build_menu() -> (HMENU, HMENU) {
         add(set, cmd::VI_MODE, "Vi モード\tCtrl+Alt+V");
         add(set, cmd::VI_HINTS, "Vi ヒントを表示（学習用）");
         sep(set);
+        add(set, cmd::RESTORE_SESSION, "終了時の状態を次回起動時に復元（終了時に保存確認を出さない）");
         add(set, cmd::AUTO_UPDATE, "自動アップデート");
         add(set, cmd::CONTEXT_MENU, &format!("エクスプローラーの右クリックに「{}」", crate::shell::LABEL));
         add(set, cmd::OPEN_CONFIG, "設定ファイルを開く");
@@ -703,6 +711,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 DeleteObject(old);
             }
             app.layout();
+            // Scintilla 側のフォント再生成（WM_DPICHANGED_AFTERPARENT）が済んでから行番号幅を測り直す
+            unsafe { PostMessageW(hwnd, WM_APP_DPI_DONE, 0, 0) };
+            0
+        }
+        WM_APP_DPI_DONE => {
+            let show = app.cfg.line_numbers;
+            for t in &mut app.tabs {
+                App::update_margin(t, show);
+            }
             0
         }
         WM_APP_STARTED => {
@@ -727,7 +744,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_CLOSE => {
-            if app.confirm_close_all() {
+            // 復元 ON なら未保存の内容ごとセッションに退避するので保存確認は出さない
+            let ok = if app.cfg.restore_session && app.save_session() {
+                true
+            } else {
+                session::clear();
+                app.confirm_close_all()
+            };
+            if ok {
                 app.save_window_state();
                 unsafe { DestroyWindow(hwnd) };
             }
@@ -941,17 +965,18 @@ impl App {
         self.set_status(6, if t.tail.is_some() { "追従中" } else { "" });
     }
 
+    /// 行番号マージンの幅を現在の桁数とフォント（ズーム・DPI 変更後も含む）に合わせる
     fn update_margin(t: &mut Tab, show: bool) {
-        let digits = if show { t.sci.line_count().to_string().len().max(3) } else { 0 };
-        if digits != t.margin_digits {
-            t.margin_digits = digits;
-            let width = if show {
-                let probe = format!("__{}\0", "9".repeat(digits));
-                t.sci.call(SCI_TEXTWIDTH, STYLE_LINENUMBER as usize, probe.as_ptr() as isize)
-            } else {
-                0
-            };
-            t.sci.call(SCI_SETMARGINWIDTHN, 0, width);
+        let width = if show {
+            let digits = t.sci.line_count().to_string().len().max(3);
+            let probe = format!("__{}\0", "9".repeat(digits));
+            t.sci.call(SCI_TEXTWIDTH, STYLE_LINENUMBER as usize, probe.as_ptr() as isize) as usize
+        } else {
+            0
+        };
+        if width != t.margin_width {
+            t.margin_width = width;
+            t.sci.call(SCI_SETMARGINWIDTHN, 0, width as isize);
         }
     }
 
@@ -972,6 +997,7 @@ impl App {
         check(cmd::VI_HINTS, self.cfg.vi_hints);
         check(cmd::AUTO_UPDATE, self.cfg.auto_update);
         check(cmd::CONTEXT_MENU, self.cfg.context_menu);
+        check(cmd::RESTORE_SESSION, self.cfg.restore_session);
         check(cmd::ENC_UTF8, t.enc == Encoding::Utf8);
         check(cmd::ENC_UTF8BOM, t.enc == Encoding::Utf8Bom);
         check(cmd::ENC_SJIS, t.enc == Encoding::Sjis);
@@ -1054,7 +1080,7 @@ impl App {
             grep: None,
             title: None,
             loaded_len: 0,
-            margin_digits: usize::MAX,
+            margin_width: usize::MAX,
         };
         Self::update_margin(&mut tab, self.cfg.line_numbers);
         tab.hl.set_log_levels(&sci, self.cfg.log_levels);
@@ -1234,11 +1260,99 @@ impl App {
                 return;
             }
         };
-        let t = &self.tabs[self.cur];
-        let reuse = t.path.is_none() && t.sci.len() == 0 && !t.sci.is_modified() && t.link.is_none();
-        let idx = if reuse { self.cur } else { self.new_tab() };
+        let idx = self.fresh_tab();
         self.load_into(idx, &p, raw, None);
         self.activate(idx);
+    }
+
+    /// 現在のタブが空の新規タブならそれを使い、そうでなければ新しいタブを作る
+    fn fresh_tab(&mut self) -> usize {
+        let t = &self.tabs[self.cur];
+        let reuse = t.path.is_none() && t.sci.len() == 0 && !t.sci.is_modified() && t.link.is_none();
+        if reuse { self.cur } else { self.new_tab() }
+    }
+
+    // ---- セッション（終了時の状態の保存と復元） ----
+
+    /// 開いているタブをセッションとして保存する。抽出結果・ガイドなどの派生タブは対象外
+    fn save_session(&self) -> bool {
+        let mut tabs = Vec::new();
+        let mut active = 0;
+        for (i, t) in self.tabs.iter().enumerate() {
+            if t.link.is_some() || (t.path.is_none() && t.title.is_some()) {
+                continue;
+            }
+            let modified = t.sci.is_modified();
+            if t.path.is_none() && !modified && t.sci.len() == 0 {
+                continue;
+            }
+            if i == self.cur {
+                active = tabs.len();
+            }
+            tabs.push(session::Entry {
+                path: t.path.clone(),
+                dirty: if modified || t.path.is_none() { Some(t.sci.bytes().to_vec()) } else { None },
+                enc: t.enc.label().to_string(),
+                eol: t.eol.label().to_string(),
+                caret: t.sci.caret(),
+                first_line: t.sci.first_visible_doc_line(),
+            });
+        }
+        session::save(&session::Session { active, tabs }).is_ok()
+    }
+
+    fn restore_session(&mut self) {
+        let Some(s) = session::load() else { return };
+        let mut opened = Vec::new();
+        for e in s.tabs {
+            let idx = match (&e.path, &e.dirty) {
+                (Some(p), None) => {
+                    if !p.exists() {
+                        continue;
+                    }
+                    self.open_path(p);
+                    self.cur
+                }
+                (path, Some(bytes)) => {
+                    let idx = self.fresh_tab();
+                    if let Some(p) = path {
+                        // 保存済みの内容を保存ポイントにしてから未保存の内容に置き換える（Undo で元に戻せる）
+                        match std::fs::read(p) {
+                            Ok(raw) => self.load_into(idx, p, raw, None),
+                            Err(_) => {
+                                let lang = Lang::from_path(p);
+                                let t = &mut self.tabs[idx];
+                                t.path = Some(p.clone());
+                                t.lang = lang;
+                                lang::apply(&t.sci, lang, &self.palette);
+                            }
+                        }
+                    }
+                    let t = &mut self.tabs[idx];
+                    if let Some(enc) = Encoding::from_label(&e.enc) {
+                        t.enc = enc;
+                    }
+                    if let Some(eol) = Eol::from_label(&e.eol) {
+                        t.eol = eol;
+                        t.sci.call(SCI_SETEOLMODE, match eol { Eol::Crlf => SC_EOL_CRLF, Eol::Lf => SC_EOL_LF, Eol::Cr => SC_EOL_CR } as usize, 0);
+                    }
+                    let len = t.sci.len();
+                    t.sci.replace_range(0, len, &String::from_utf8_lossy(bytes));
+                    self.update_tab_label(idx);
+                    idx
+                }
+                (None, None) => continue,
+            };
+            let t = &self.tabs[idx];
+            t.sci.goto(e.caret.min(t.sci.len()));
+            let first = t.sci.call(SCI_VISIBLEFROMDOCLINE, e.first_line, 0);
+            t.sci.call(SCI_SETFIRSTVISIBLELINE, first.max(0) as usize, 0);
+            opened.push(idx);
+        }
+        if let Some(&idx) = opened.get(s.active) {
+            self.cur = usize::MAX;
+            self.activate(idx);
+        }
     }
 
     fn load_into(&mut self, idx: usize, p: &Path, raw: Vec<u8>, force_enc: Option<Encoding>) {
@@ -1339,7 +1453,7 @@ impl App {
         self.apply_chrome();
         self.restyle_all();
         for t in &mut self.tabs {
-            t.margin_digits = usize::MAX;
+            t.margin_width = usize::MAX;
             Self::update_margin(t, self.cfg.line_numbers);
         }
         if old_vi != self.cfg.vi_mode {
@@ -1604,6 +1718,15 @@ impl App {
             cmd::VI_HINTS => {
                 self.cfg.vi_hints = !self.cfg.vi_hints;
             }
+            cmd::RESTORE_SESSION => {
+                self.cfg.restore_session = !self.cfg.restore_session;
+                self.cfg.save();
+                self.msg(if self.cfg.restore_session {
+                    "終了時の状態を次回起動時に復元します（終了時の保存確認は出ません）"
+                } else {
+                    "終了時の状態は復元しません（未保存の変更は終了時に確認します）"
+                });
+            }
             cmd::AUTO_UPDATE => {
                 self.cfg.auto_update = !self.cfg.auto_update;
                 self.cfg.save();
@@ -1654,7 +1777,8 @@ impl App {
     }
 
     fn restart(&mut self) {
-        if !self.confirm_close_all() {
+        let ok = if self.cfg.restore_session && self.save_session() { true } else { self.confirm_close_all() };
+        if !ok {
             return;
         }
         let files: Vec<String> = self.tabs.iter().filter(|t| t.link.is_none()).filter_map(|t| t.path.as_ref()).map(|p| p.display().to_string()).collect();
@@ -1680,6 +1804,10 @@ impl App {
                     }
                     self.update_status();
                 }
+            }
+            SCN_ZOOM => {
+                let show = self.cfg.line_numbers;
+                Self::update_margin(&mut self.tabs[i], show);
             }
             SCN_SAVEPOINTREACHED | SCN_SAVEPOINTLEFT => {
                 self.update_tab_label(i);
@@ -1869,7 +1997,7 @@ impl App {
         let s = t.sci;
         t.hl.set_log_levels(&s, log_levels);
         t.hl.set_patterns(&s, highlights);
-        t.margin_digits = usize::MAX;
+        t.margin_width = usize::MAX;
         t.link = Some(FilterLink {
             source: r.source,
             source_path: r.source_path,

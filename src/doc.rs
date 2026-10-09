@@ -12,6 +12,12 @@ pub enum Encoding {
 }
 
 impl Encoding {
+    pub fn from_label(s: &str) -> Option<Encoding> {
+        [Encoding::Utf8, Encoding::Utf8Bom, Encoding::Sjis, Encoding::Utf16Le, Encoding::Utf16Be]
+            .into_iter()
+            .find(|e| e.label() == s)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Encoding::Utf8 => "UTF-8",
@@ -31,6 +37,10 @@ pub enum Eol {
 }
 
 impl Eol {
+    pub fn from_label(s: &str) -> Option<Eol> {
+        [Eol::Crlf, Eol::Lf, Eol::Cr].into_iter().find(|e| e.label() == s)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Eol::Crlf => "CRLF",

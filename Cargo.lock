@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "sakura2"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "cc",
  "embed-resource",

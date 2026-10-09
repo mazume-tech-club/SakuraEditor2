@@ -15,6 +15,7 @@ mod shell;
 mod tail;
 mod theme;
 mod chrome;
+mod session;
 mod ui;
 mod update;
 mod util;
