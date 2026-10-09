@@ -22,7 +22,7 @@ use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::Ime::{IACE_DEFAULT, ImmAssociateContextEx};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetFocus, GetKeyState, SetFocus, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F3,
-    VK_F12, VK_HOME, VK_LEFT, VK_NEXT, VK_OEM_4, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
+    VK_F12, VK_F2, VK_HOME, VK_LEFT, VK_NEXT, VK_OEM_4, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
 };
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, ShellExecuteW};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -105,10 +105,13 @@ mod cmd {
     pub const AUTO_UPDATE: u16 = 40072;
     pub const OPEN_CONFIG: u16 = 40073;
     pub const CHEAT_SHEET: u16 = 40080;
+    pub const GUIDE: u16 = 40084;
     pub const CHECK_UPDATE: u16 = 40081;
     pub const RESTART: u16 = 40082;
     pub const ABOUT: u16 = 40083;
     pub const GREP_CLEAR: u16 = 40068;
+    pub const ADD_NEXT_MATCH: u16 = 40053;
+    pub const SELECT_ALL_MATCHES: u16 = 40054;
     pub const CONTEXT_MENU: u16 = 40074;
     pub const NEXT_TAB: u16 = 40090;
     pub const PREV_TAB: u16 = 40091;
@@ -418,6 +421,9 @@ fn build_menu() -> HMENU {
         add(edit, cmd::PASTE, "貼り付け\tCtrl+V");
         add(edit, cmd::SELECT_ALL, "すべて選択\tCtrl+A");
         sep(edit);
+        add(edit, cmd::ADD_NEXT_MATCH, "次の一致を追加（複数カーソル）\tCtrl+D");
+        add(edit, cmd::SELECT_ALL_MATCHES, "すべての一致を選択（複数カーソル）\tF2 / Alt+Enter");
+        sep(edit);
         add(edit, cmd::JSON_FORMAT, "JSON を整形\tAlt+Shift+F");
         add(edit, cmd::JSON_MINIFY, "JSON を 1 行に圧縮\tAlt+Shift+M");
         sub("編集(&E)", edit);
@@ -456,7 +462,8 @@ fn build_menu() -> HMENU {
         sub("設定(&O)", set);
 
         let help = CreatePopupMenu();
-        add(help, cmd::CHEAT_SHEET, "Vi チートシート\tF1");
+        add(help, cmd::GUIDE, "操作ガイド\tF1");
+        add(help, cmd::CHEAT_SHEET, "Vi チートシート\tShift+F1");
         sep(help);
         add(help, cmd::CHECK_UPDATE, "アップデートを確認");
         add(help, cmd::RESTART, "再起動（更新を適用）");
@@ -483,6 +490,9 @@ fn build_accel() -> HACCEL {
         v(0, VK_F3, cmd::FIND_NEXT),
         v(s, VK_F3, cmd::FIND_PREV),
         v(c, k('H'), cmd::REPLACE),
+        v(c, k('D'), cmd::ADD_NEXT_MATCH),
+        v(0, VK_F2, cmd::SELECT_ALL_MATCHES),
+        v(a, VK_RETURN, cmd::SELECT_ALL_MATCHES),
         v(c, k('G'), cmd::GOTO),
         v(a | s, k('F'), cmd::JSON_FORMAT),
         v(a | s, k('M'), cmd::JSON_MINIFY),
@@ -492,7 +502,8 @@ fn build_accel() -> HACCEL {
         v(a, k('Z'), cmd::WRAP),
         v(0, VK_F12, cmd::JUMP_SOURCE),
         v(c | a, k('V'), cmd::VI_MODE),
-        v(0, VK_F1, cmd::CHEAT_SHEET),
+        v(0, VK_F1, cmd::GUIDE),
+        v(s, VK_F1, cmd::CHEAT_SHEET),
         v(c, VK_TAB, cmd::NEXT_TAB),
         v(c | s, VK_TAB, cmd::PREV_TAB),
         v(c, VK_NEXT, cmd::NEXT_TAB),
@@ -709,7 +720,7 @@ impl App {
         self.focus_editor();
         let shown = self.shown_ms;
         let ms = self.started.elapsed().as_secs_f64() * 1000.0;
-        self.msg(&format!("準備完了（表示 {shown:.0} ms）  F1: Vi チートシート / Ctrl+Shift+L: ログフィルタ"));
+        self.msg(&format!("準備完了（表示 {shown:.0} ms）  F1: 操作ガイド / Ctrl+Shift+L: ログフィルタ"));
         if self.bench {
             let dir = util::local_data_dir();
             let _ = std::fs::create_dir_all(&dir);
@@ -809,7 +820,14 @@ impl App {
         let line = sci.line_of(pos);
         let col = sci.column(pos);
         let (a, b) = sci.sel_range();
-        let sel = if b > a { format!("  選択 {}", b - a) } else { String::new() };
+        let cursors = sci.call(SCI_GETSELECTIONS, 0, 0) as usize;
+        let sel = if cursors > 1 {
+            format!("  カーソル {}", fmt_num(cursors))
+        } else if b > a {
+            format!("  選択 {}", b - a)
+        } else {
+            String::new()
+        };
         let vi = if self.cfg.vi_mode {
             let p = self.vi.pending_label();
             if p.is_empty() { self.vi.mode.label().to_string() } else { format!("{}  {p}", self.vi.mode.label()) }
@@ -1323,6 +1341,8 @@ impl App {
                 }
             }
             cmd::GREP_CLEAR => self.clear_grep(),
+            cmd::ADD_NEXT_MATCH => self.select_matches(false),
+            cmd::SELECT_ALL_MATCHES => self.select_matches(true),
             cmd::CONTEXT_MENU => {
                 self.cfg.context_menu = !self.cfg.context_menu;
                 self.cfg.save();
@@ -1399,6 +1419,7 @@ impl App {
                 self.open_path(&p);
                 self.msg("設定を編集して保存すると即座に反映されます");
             }
+            cmd::GUIDE => self.open_text_tab("操作ガイド", crate::help::GUIDE, Lang::Text),
             cmd::CHEAT_SHEET => self.open_text_tab("Vi チートシート", vi::hints::CHEAT_SHEET, Lang::Text),
             cmd::CHECK_UPDATE => {
                 self.msg("アップデートを確認しています...");
@@ -1446,7 +1467,7 @@ impl App {
                 if i == self.cur {
                     let show = self.cfg.line_numbers;
                     let t = &mut self.tabs[i];
-                    if n.updated & (SC_UPDATE_CONTENT | SC_UPDATE_V_SCROLL) as i32 != 0 {
+                    if n.updated & (SC_UPDATE_CONTENT | SC_UPDATE_V_SCROLL | SC_UPDATE_H_SCROLL) as i32 != 0 {
                         let s = t.sci;
                         t.hl.refresh(&s, false);
                         Self::update_margin(t, show);
@@ -1816,20 +1837,17 @@ impl App {
             SendMessageW(sci.hwnd, WM_SETREDRAW, 1, 0);
             windows_sys::Win32::Graphics::Gdi::InvalidateRect(sci.hwnd, std::ptr::null(), 1);
         }
-        // キャレットが隠れた行にあれば、近くの一致行へ移す
-        let cur_line = sci.line_of(sci.caret());
-        if sci.call(SCI_GETLINEVISIBLE, cur_line, 0) == 0 {
-            let target = hits.iter().map(|h| h.0 as usize).find(|&l| l >= cur_line).unwrap_or(hits[0].0 as usize);
-            sci.goto(sci.line_start(target));
-        }
-        sci.call(SCI_SCROLLCARET, 0, 0);
+        // 行の先頭ではなく一致そのものを選択する（1 行が長いテキストでも F3 で続けて移れる）
         let re = compiled.highlights.first().map(|(r, _)| r.clone());
+        let found = re.as_ref().and_then(|re| self.goto_match(re, sci.sel_range().0, true));
+        sci.call(SCI_SCROLLCARET, 0, 0);
         let t = &mut self.tabs[self.cur];
         t.hl.set_search(&sci, re);
         t.grep = Some(Grep { pattern: pat.to_string(), compiled });
         self.find_pat = Some(pat.to_string());
+        let pos = found.map(|(n, i, _)| format!("  {} 件中 {} 件目", fmt_num(n), fmt_num(i))).unwrap_or_default();
         self.msg(&format!(
-            "絞り込み: {} / {} 行 [{} ms]  Esc か空欄 Enter で解除 / Ctrl+Enter で Temp に出力 / F3 で次へ",
+            "絞り込み: {} / {} 行{pos} [{} ms]  Esc か空欄 Enter で解除 / Ctrl+Enter で Temp に出力 / F3 で次へ",
             fmt_num(hits.len()),
             fmt_num(total),
             t0.elapsed().as_millis()
@@ -1871,24 +1889,90 @@ impl App {
         };
         let sci = self.sci();
         let (a, b) = sci.sel_range();
-        let from = if forward { b.max(a) } else { a };
-        let buf = SciBuf(&sci);
-        use crate::vi::buf::Buf;
-        let from = if forward { buf.prev_pos(from) } else { from };
-        match buf.search(&re, from, forward) {
-            Some((s, e, wrapped)) => {
-                if self.cfg.vi_mode && self.vi.mode != Mode::Insert {
-                    sci.goto(s);
-                } else {
-                    sci.set_sel(s, e);
-                }
+        match self.goto_match(&re, if forward { b } else { a }, forward) {
+            Some((n, i, wrapped)) => {
                 sci.call(SCI_SCROLLCARET, 0, 0);
-                self.msg(if wrapped { "端に達したので反対側から検索しました" } else { "F3: 次 / Shift+F3: 前" });
+                let pos = format!("{} 件中 {} 件目", fmt_num(n), fmt_num(i));
+                self.msg(&if wrapped {
+                    format!("{pos}  端に達したので反対側から検索しました")
+                } else {
+                    format!("{pos}  F3: 次 / Shift+F3: 前")
+                });
             }
             None => self.msg(&format!("見つかりません: {pat}")),
         }
         let t = &mut self.tabs[self.cur];
         t.hl.set_search(&sci, Some(re));
+    }
+
+    /// from 以降（forward=false なら from より前）の一致を選択する。
+    /// 戻り値は (一致の総数, 何件目か, 端で折り返したか)
+    fn goto_match(&mut self, re: &regex::bytes::Regex, from: usize, forward: bool) -> Option<(usize, usize, bool)> {
+        let sci = self.sci();
+        let buf = SciBuf(&sci);
+        use crate::vi::buf::Buf;
+        // Buf::search の前方検索は from の次の文字から探すので、1 文字戻して from 自身も対象にする
+        let (s, e, wrapped) = if forward && from == 0 {
+            re.find(sci.bytes()).map(|m| (m.start(), m.end(), false))?
+        } else {
+            buf.search(re, if forward { buf.prev_pos(from) } else { from }, forward)?
+        };
+        if self.cfg.vi_mode && self.vi.mode != Mode::Insert {
+            sci.goto(s);
+        } else {
+            sci.set_sel(s, e);
+        }
+        let (mut n, mut i) = (0, 0);
+        for m in re.find_iter(sci.bytes()) {
+            n += 1;
+            if m.start() <= s {
+                i = n;
+            }
+        }
+        Some((n, i, wrapped))
+    }
+
+    /// 複数カーソル: 選択中の文字列（無ければキャレット位置の単語）の一致を選択に加える。
+    /// all=false なら次の 1 件、true ならすべて
+    fn select_matches(&mut self, all: bool) {
+        if self.cfg.vi_mode && self.vi.mode != Mode::Insert {
+            self.msg("複数カーソルは挿入モードで使えます（i で挿入モード）");
+            return;
+        }
+        let sci = self.sci();
+        sci.call(SCI_SETSEARCHFLAGS, SCFIND_MATCHCASE as usize, 0);
+        sci.call(SCI_TARGETWHOLEDOCUMENT, 0, 0);
+        // 選択が空なら Scintilla がキャレット位置の単語を選択する（以後は単語単位で一致を探す）
+        if sci.call(SCI_GETSELECTIONEMPTY, 0, 0) != 0 {
+            sci.call(SCI_MULTIPLESELECTADDNEXT, 0, 0);
+            if sci.call(SCI_GETSELECTIONEMPTY, 0, 0) != 0 {
+                self.msg("記号などは先に選択してから実行してください（例: ; を選択して F2）");
+                return;
+            }
+            if !all {
+                self.after_select_matches();
+                return;
+            }
+        }
+        if all {
+            let n = count_occurrences(sci.bytes(), sci.sel_text().as_bytes());
+            if n > MAX_CURSORS {
+                self.msg(&format!("一致が多すぎます（上限 {} 件）。Ctrl+H の置換を使ってください", fmt_num(MAX_CURSORS)));
+                return;
+            }
+            sci.call(SCI_MULTIPLESELECTADDEACH, 0, 0);
+        } else {
+            sci.call(SCI_MULTIPLESELECTADDNEXT, 0, 0);
+        }
+        self.after_select_matches();
+    }
+
+    fn after_select_matches(&mut self) {
+        let sci = self.sci();
+        sci.call(SCI_SCROLLCARET, 0, 0);
+        let n = sci.call(SCI_GETSELECTIONS, 0, 0) as usize;
+        self.msg(&format!("{} 箇所を選択中  入力すると全箇所に反映 / Ctrl+D で次を追加 / Esc で解除", fmt_num(n)));
+        self.update_status();
     }
 
     fn open_cmdline(&mut self, mode: CmdMode, prefill: &str) {
@@ -2117,7 +2201,7 @@ impl App {
             self.apply_caret_style(&t.sci);
         }
         self.msg(if on {
-            "Vi モード ON（i で挿入、Esc で戻る、:q で閉じる、F1 でチートシート）"
+            "Vi モード ON（i で挿入、Esc で戻る、:q で閉じる、Shift+F1 でチートシート）"
         } else {
             "Vi モード OFF（通常のエディタ操作）"
         });
@@ -2306,6 +2390,26 @@ fn grep_spec(pat: &str, line_numbers: bool) -> FilterSpec {
         }],
         line_numbers,
     }
+}
+
+/// すべての一致を選択するときのカーソル数の上限（多すぎると入力のたびに重くなる）
+const MAX_CURSORS: usize = 10_000;
+
+/// hay に含まれる needle の個数（重なりは数えない）。上限を超えたら数えるのをやめる
+fn count_occurrences(hay: &[u8], needle: &[u8]) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    let mut n = 0;
+    let mut i = 0;
+    while let Some(p) = hay[i..].windows(needle.len()).position(|w| w == needle) {
+        n += 1;
+        i += p + needle.len();
+        if n > MAX_CURSORS {
+            break;
+        }
+    }
+    n
 }
 
 /// [from, to] の行のうち keep に含まれない行を隠す（keep は昇順）

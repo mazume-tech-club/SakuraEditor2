@@ -441,7 +441,7 @@ impl Vi {
                     self.exit_visual(b);
                     return Outcome::eaten(Effect::None);
                 }
-                self.hint = format!("{keys}: 未対応のコマンドです（F1 でチートシート）");
+                self.hint = format!("{keys}: 未対応のコマンドです（Shift+F1 でチートシート）");
                 Outcome::eaten(Effect::None)
             }
             Parsed::Done(cmd) => {

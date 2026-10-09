@@ -4,6 +4,7 @@ mod app;
 mod config;
 mod doc;
 mod filter;
+mod help;
 mod json_fmt;
 mod lang;
 mod lexer_consts;

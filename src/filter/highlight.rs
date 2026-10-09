@@ -66,7 +66,7 @@ pub struct Highlighter {
     pub search: Option<Regex>,
     /// ERROR / WARN 行の背景色分け
     pub log_levels: bool,
-    last: (usize, usize, usize),
+    last: (usize, usize, usize, usize),
     had_any: bool,
 }
 
@@ -127,16 +127,21 @@ impl Highlighter {
                 lines.push(l);
             }
         }
-        let key = (lines.first().copied().unwrap_or(0), lines.last().copied().unwrap_or(0), sci.len());
+        // 長い行は横スクロール・折り返し内のスクロールでも行番号が変わらないので、画面左上の位置もキーに含める
+        let view = visible_span(sci);
+        let key = (lines.first().copied().unwrap_or(0), lines.last().copied().unwrap_or(0), sci.len(), view.0);
         if !force && key == self.last {
             return;
         }
         self.last = key;
         self.had_any = true;
         for &line in &lines {
-            let (start, end) = (sci.line_start(line), sci.line_end(line));
+            let (mut start, mut end) = (sci.line_start(line), sci.line_end(line));
             if end < start {
                 continue;
+            }
+            if end - start > LONG_LINE {
+                (start, end) = clip_long_line(sci, start, end, view);
             }
             for ind in IND_FILTER_BASE..=IND_SEARCH {
                 sci.call(SCI_SETINDICATORCURRENT, ind, 0);
@@ -164,6 +169,41 @@ impl Highlighter {
             }
         }
     }
+}
+
+/// これを超える長さの行は、画面に見えている前後だけをハイライトする
+const LONG_LINE: usize = 16 * 1024;
+/// 見えている範囲の前後に余分に処理する文字数（小さなスクロールで色が欠けないように）
+const LONG_LINE_MARGIN: isize = 2048;
+
+/// 画面左上と右下の文書位置
+fn visible_span(sci: &Sci) -> (usize, usize) {
+    let mut rc = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(sci.hwnd, &mut rc) };
+    let a = sci.call(SCI_POSITIONFROMPOINT, 0, 0) as usize;
+    let b = sci.call(SCI_POSITIONFROMPOINT, rc.right.max(0) as usize, rc.bottom.max(0) as isize) as usize;
+    (a.min(b), a.max(b))
+}
+
+/// 長い行のうち、画面に見えている部分（＋前後の余白）だけを返す
+fn clip_long_line(sci: &Sci, start: usize, end: usize, view: (usize, usize)) -> (usize, usize) {
+    let wrap = sci.call(SCI_GETWRAPMODE, 0, 0) != 0;
+    let (lo, hi) = if wrap {
+        view
+    } else {
+        // 折り返しなし: この行の画面上の y で左端と右端の位置を取る
+        let mut rc = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(sci.hwnd, &mut rc) };
+        let y = sci.call(SCI_POINTYFROMPOSITION, 0, start as isize);
+        let a = sci.call(SCI_POSITIONFROMPOINT, 0, y) as usize;
+        let b = sci.call(SCI_POSITIONFROMPOINT, rc.right.max(0) as usize, y) as usize;
+        (a, b)
+    };
+    let lo = (sci.call(SCI_POSITIONRELATIVE, lo.clamp(start, end), -LONG_LINE_MARGIN) as usize).max(start);
+    let hi = sci.call(SCI_POSITIONRELATIVE, hi.clamp(start, end), LONG_LINE_MARGIN) as usize;
+    // 文書末を超えると 0 が返る
+    let hi = if hi == 0 { end } else { hi.min(end) };
+    (lo, hi.max(lo))
 }
 
 fn set_marker(sci: &Sci, line: usize, mark: usize, on: bool) {

@@ -143,7 +143,7 @@ pub(crate) fn pending(keys: &[Key]) -> String {
     format!("{s}  … {guide}")
 }
 
-pub const CHEAT_SHEET: &str = r#"さくらえでぃた弐 Vi モード チートシート            （F1 でいつでも表示 / Ctrl+Alt+V で Vi モード切替）
+pub const CHEAT_SHEET: &str = r#"さくらえでぃた弐 Vi モード チートシート            （Shift+F1 でいつでも表示 / Ctrl+Alt+V で Vi モード切替）
 ================================================================================================
 
 ■ モード

@@ -336,7 +336,7 @@ pub fn run(vi: &mut Vi, b: &mut dyn Buf, input: &str) -> ExEffect {
         "tail" => ExEffect::Tail,
         "json" => ExEffect::Json,
         "vi" | "novi" => ExEffect::ViOff,
-        _ => ExEffect::Error(format!("未対応のコマンド: :{input}（F1 でチートシート）")),
+        _ => ExEffect::Error(format!("未対応のコマンド: :{input}（Shift+F1 でチートシート）")),
     }
 }
 
@@ -350,6 +350,15 @@ mod tests {
         let mut vi = Vi::new();
         let r = run(&mut vi, &mut b, cmd);
         (b.s, r)
+    }
+
+    #[test]
+    fn substitute_newline_in_replacement() {
+        let (s, r) = ex("a;b;c", r"%s/;/;
+/g");
+        assert_eq!(s, "a;
+b;
+c", "{r:?}");
     }
 
     #[test]
