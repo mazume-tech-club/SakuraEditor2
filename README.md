@@ -56,6 +56,7 @@
 | 絞り込み検索（一致行だけ表示＝Grep 表示） | `Ctrl+F`（入力するとその場で絞り込み、`Esc` か空欄で `Enter` で解除、`Ctrl+Enter` で Temp に出力） |
 | 次／前の一致、置換、行移動 | `F3`／`Shift+F3`、`Ctrl+H`、`Ctrl+G` |
 | 複数カーソル: 次の一致を追加／すべての一致を選択 | `Ctrl+D`／`F2`・`Alt+Enter`（Vi モードでは挿入モードのみ） |
+| テーマ（ライト／ダーク／カスタム） | 表示 > テーマ。「テーマを編集」で `%APPDATA%\Sakura2\themes\*.ini` を開き、保存すると即反映 |
 | エクスプローラーの右クリック | 「さくらえでぃた弐 で開く」（初回起動時に自動登録。設定メニューで ON/OFF。Windows 11 は「その他のオプションを確認」の中） |
 
 ### 絞り込み検索（Ctrl+F）
@@ -134,6 +135,7 @@ git push origin main --tags
 | `json_indent` | 4 | JSON 整形のインデント（0 でタブ） |
 | `wrap` / `line_numbers` | 0 / 1 | 折り返し／行番号 |
 | `log_levels` | 1 | ERROR/WARN 行の色分け |
+| `theme` | light | `light` / `dark` / `themes\<名前>.ini` のファイル名 |
 | `directwrite` | 0 | 1 で DirectWrite 描画（起動は少し遅くなる） |
 | `vi_mode` / `vi_hints` | 0 / 1 | Vi モード／学習ヒント |
 | `auto_update` | 1 | 自動アップデート |
