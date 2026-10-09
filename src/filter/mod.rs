@@ -13,6 +13,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     STN_CLICKED, SendMessageW, WS_EX_CLIENTEDGE, WS_TABSTOP,
 };
 
+use crate::chrome::{self, Kind};
 use crate::ui::{SS_CENTER, SS_LEFT, SS_NOTIFY};
 
 use crate::ui;
@@ -65,6 +66,7 @@ pub struct Panel {
     /// 起動を速くするため、コントロールは最初に表示するときに作る
     created: bool,
     pending: FilterSpec,
+    dark: bool,
 }
 
 impl Panel {
@@ -85,6 +87,31 @@ impl Panel {
             count_is_error: false,
             created: false,
             pending: FilterSpec { patterns: vec![PatternSpec { regex: true, ..Default::default() }], line_numbers: false },
+            dark: false,
+        }
+    }
+
+    /// 枠の配色（ダーク／ライト）を全部品に適用する
+    pub fn restyle(&mut self, dark: bool) {
+        self.dark = dark;
+        if !self.created {
+            return;
+        }
+        for h in [self.add, self.run, self.close] {
+            chrome::style_child(h, Kind::Button, dark);
+        }
+        chrome::style_child(self.linenum, Kind::CheckBox, dark);
+        for i in 0..self.rows.len() {
+            self.style_row(i);
+        }
+    }
+
+    fn style_row(&self, i: usize) {
+        let r = &self.rows[i];
+        chrome::style_child(r.edit, Kind::Edit, self.dark);
+        chrome::style_child(r.remove, Kind::Button, self.dark);
+        for h in [r.exclude, r.case, r.regex] {
+            chrome::style_child(h, Kind::CheckBox, self.dark);
         }
     }
 
@@ -101,6 +128,12 @@ impl Panel {
         self.run = c("BUTTON", "▶ 抽出して Temp に出力 (Enter)", BS_PUSHBUTTON as u32 | WS_TABSTOP, ID_RUN);
         self.count = c("STATIC", "", SS_LEFT, ID_COUNT);
         self.close = c("BUTTON", "×", BS_PUSHBUTTON as u32, ID_CLOSE);
+        if self.dark {
+            for h in [self.add, self.run, self.close] {
+                chrome::style_child(h, Kind::Button, true);
+            }
+            chrome::style_child(self.linenum, Kind::CheckBox, true);
+        }
         self.add_row(PatternSpec { regex: true, ..Default::default() });
         let spec = std::mem::take(&mut self.pending);
         self.set_spec(&spec);
@@ -151,6 +184,9 @@ impl Panel {
         ui::set_checked(row.case, spec.case_sensitive);
         ui::set_checked(row.regex, spec.regex);
         self.rows.push(row);
+        if self.dark {
+            self.style_row(i);
+        }
         true
     }
 

@@ -14,6 +14,7 @@ mod sci_consts;
 mod shell;
 mod tail;
 mod theme;
+mod chrome;
 mod ui;
 mod update;
 mod util;

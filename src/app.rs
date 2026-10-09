@@ -7,7 +7,8 @@ use std::time::Instant;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    COLOR_BTNFACE, DeleteObject, GetSysColorBrush, HDC, HFONT, SetBkMode, SetTextColor, TRANSPARENT,
+    COLOR_BTNFACE, DeleteObject, FillRect, GetSysColorBrush, HDC, HFONT, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME,
+    RDW_INVALIDATE, RedrawWindow, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows_sys::Win32::UI::Controls::Dialogs::{
     GetOpenFileNameW, GetSaveFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST,
@@ -24,9 +25,12 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetFocus, GetKeyState, SetFocus, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F3,
     VK_F12, VK_F2, VK_HOME, VK_LEFT, VK_NEXT, VK_OEM_4, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
 };
-use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, ShellExecuteW};
+use windows_sys::Win32::UI::Shell::{
+    DefSubclassProc, DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SetWindowSubclass, ShellExecuteW,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+use crate::chrome::{self, Brushes, Kind};
 use crate::config::Config;
 use crate::doc::{self, Encoding, Eol};
 use crate::filter::engine::{self, Compiled, FilterSpec, PatternSpec};
@@ -211,6 +215,9 @@ pub struct App {
     cfg: Config,
     palette: Palette,
     theme_menu: HMENU,
+    /// 枠をダーク描画しているか（palette.is_dark() の反映結果）
+    dark: bool,
+    brushes: Brushes,
     find_pat: Option<String>,
     count_gen: u64,
     started: Instant,
@@ -341,6 +348,8 @@ pub fn run(started: Instant) -> i32 {
             cfg,
             palette,
             theme_menu,
+            dark: false,
+            brushes: Brushes::none(),
             find_pat: None,
             count_gen: 0,
             started,
@@ -353,6 +362,9 @@ pub fn run(started: Instant) -> i32 {
             last_focus: std::ptr::null_mut(),
         });
         let app = app_opt().unwrap();
+        SetWindowSubclass(tabctl, Some(tab_proc), 1, 0);
+        SetWindowSubclass(status, Some(status_proc), 1, 0);
+        app.apply_chrome();
         if !app.cfg.filter.patterns.is_empty() {
             let spec = app.cfg.filter.clone();
             app.panel.set_spec(&spec);
@@ -605,21 +617,56 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_CTLCOLORSTATIC => {
             let hdc = wparam as HDC;
             let ctl = lparam as HWND;
+            let bg = if app.dark { app.brushes.ui } else { unsafe { GetSysColorBrush(COLOR_BTNFACE) } };
             if let Some(c) = app.panel.swatch_color(ctl) {
                 unsafe {
                     SetTextColor(hdc, util::rgb(c) as u32);
                     SetBkMode(hdc, TRANSPARENT as i32);
-                    return GetSysColorBrush(COLOR_BTNFACE) as LRESULT;
+                    return bg as LRESULT;
                 }
             }
             if ctl == app.panel.count && app.panel.count_is_error {
                 unsafe {
-                    SetTextColor(hdc, util::rgb(0xD00000) as u32);
+                    SetTextColor(hdc, util::rgb(if app.dark { app.palette.error } else { 0xD00000 }) as u32);
                     SetBkMode(hdc, TRANSPARENT as i32);
-                    return GetSysColorBrush(COLOR_BTNFACE) as LRESULT;
+                    return bg as LRESULT;
+                }
+            }
+            if app.dark {
+                unsafe {
+                    SetTextColor(hdc, util::rgb(app.palette.ui_fg) as u32);
+                    SetBkColor(hdc, util::rgb(app.palette.ui_bg) as u32);
+                    return bg as LRESULT;
                 }
             }
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+        WM_CTLCOLOREDIT if app.dark => unsafe {
+            SetTextColor(wparam as HDC, util::rgb(app.palette.fg) as u32);
+            SetBkColor(wparam as HDC, util::rgb(app.palette.bg) as u32);
+            app.brushes.edit as LRESULT
+        },
+        WM_CTLCOLORBTN if app.dark => app.brushes.ui as LRESULT,
+        WM_ERASEBKGND if app.dark => unsafe {
+            let mut rc: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut rc);
+            FillRect(wparam as HDC, &rc, app.brushes.ui);
+            1
+        },
+        chrome::WM_UAHDRAWMENU if app.dark => {
+            chrome::draw_menubar(hwnd, lparam, app.brushes.ui);
+            0
+        }
+        chrome::WM_UAHDRAWMENUITEM if app.dark => {
+            chrome::draw_menu_item(lparam, &app.palette, app.brushes.ui);
+            0
+        }
+        WM_NCPAINT | WM_NCACTIVATE => {
+            let r = unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+            if app.dark {
+                chrome::draw_menubar_line(hwnd, app.brushes.ui);
+            }
+            r
         }
         WM_INITMENUPOPUP => {
             if wparam as HMENU == app.theme_menu {
@@ -692,6 +739,38 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
+}
+
+unsafe extern "system" fn tab_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
+    if let Some(app) = app_opt() {
+        if app.dark {
+            match msg {
+                WM_ERASEBKGND => return 1,
+                WM_PAINT => {
+                    chrome::paint_tabs(hwnd, &app.palette, &app.brushes);
+                    return 0;
+                }
+                _ => {}
+            }
+        }
+    }
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+unsafe extern "system" fn status_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
+    if let Some(app) = app_opt() {
+        if app.dark {
+            match msg {
+                WM_ERASEBKGND => return 1,
+                WM_PAINT => {
+                    chrome::paint_status(hwnd, &app.palette, &app.brushes);
+                    return 0;
+                }
+                _ => {}
+            }
+        }
+    }
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
 fn fmt_num(n: usize) -> String {
@@ -956,6 +1035,9 @@ impl App {
         let id = self.next_id;
         self.next_id += 1;
         let sci = Sci::create(self.hwnd, self.hinst, IDC_SCI_BASE + id as usize);
+        if self.dark {
+            chrome::style_child(sci.hwnd, Kind::Scintilla, true);
+        }
         self.setup_sci(&sci);
         sci.call(SCI_SETEOLMODE, SC_EOL_CRLF as usize, 0);
         lang::apply(&sci, Lang::Text, &self.palette);
@@ -1254,6 +1336,7 @@ impl App {
         let old_vi = self.cfg.vi_mode;
         self.cfg = Config::load();
         self.palette = Palette::load(&self.cfg.theme);
+        self.apply_chrome();
         self.restyle_all();
         for t in &mut self.tabs {
             t.margin_digits = usize::MAX;
@@ -1280,8 +1363,35 @@ impl App {
             self.cfg.save();
         }
         self.palette = Palette::load(name);
+        self.apply_chrome();
         self.restyle_all();
         self.msg(&format!("テーマ: {name}"));
+    }
+
+    /// ウィンドウ枠（タイトルバー・メニュー・タブ・ステータスバー・パネル）をテーマに合わせる
+    fn apply_chrome(&mut self) {
+        let dark = self.palette.is_dark();
+        let was = self.dark;
+        self.dark = dark;
+        self.brushes.release();
+        if dark {
+            self.brushes = Brushes::create(&self.palette);
+        }
+        chrome::set_title_bar(self.hwnd, &self.palette, dark);
+        // ライトのままなら OS 標準描画なので何もしない（起動を重くしない）
+        if !dark && !was {
+            return;
+        }
+        chrome::set_app_mode(dark);
+        for t in &self.tabs {
+            chrome::style_child(t.sci.hwnd, Kind::Scintilla, dark);
+        }
+        chrome::style_child(self.cmd_edit, Kind::Edit, dark);
+        self.panel.restyle(dark);
+        unsafe {
+            DrawMenuBar(self.hwnd);
+            RedrawWindow(self.hwnd, std::ptr::null(), std::ptr::null_mut(), RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+        }
     }
 
     /// テーマを編集用にファイルとして開く。無ければ現在の配色から作る

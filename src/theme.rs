@@ -103,6 +103,13 @@ impl Palette {
         }
     }
 
+    /// UI 背景が暗いか（ウィンドウ枠もダーク描画にするかの判定）
+    pub fn is_dark(&self) -> bool {
+        let c = self.ui_bg;
+        let (r, g, b) = ((c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff);
+        (r * 299 + g * 587 + b * 114) / 1000 < 128
+    }
+
     pub fn load(name: &str) -> Self {
         match name {
             "light" => Palette::light(),
