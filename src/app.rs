@@ -169,9 +169,18 @@ pub struct Tab {
     pub link: Option<FilterLink>,
     pub grep: Option<Grep>,
     pub title: Option<String>,
+    /// 操作ガイドなど内蔵テキスト（ログではないので ERROR/WARN の色分けはしない）
+    pub help: bool,
     /// 読み込み/保存時のファイルサイズ（tail の開始位置）
     pub loaded_len: u64,
     margin_width: usize,
+}
+
+impl Tab {
+    /// ERROR/WARN 行の色分けを適用してよいタブか（ログ系の言語で、内蔵テキストでない）
+    fn log_colors(&self) -> bool {
+        !self.help && self.lang.is_log_like()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -237,6 +246,8 @@ pub struct App {
     /// 初回描画が終わるまではフォーカス設定（IME 初期化で重い）を遅らせる
     ready: bool,
     shown_ms: f64,
+    /// ステータスバーに「N 箇所を選択中」を表示中（複数カーソルが終わったら消す）
+    multi_msg: std::cell::Cell<bool>,
     /// 非アクティブになる直前にフォーカスがあった子ウィンドウ
     last_focus: HWND,
 }
@@ -368,6 +379,7 @@ pub fn run(started: Instant) -> i32 {
             updated_to: None,
             ready: false,
             shown_ms: 0.0,
+            multi_msg: std::cell::Cell::new(false),
             last_focus: std::ptr::null_mut(),
         });
         let app = app_opt().unwrap();
@@ -994,6 +1006,11 @@ impl App {
         let col = sci.column(pos);
         let (a, b) = sci.sel_range();
         let cursors = sci.call(SCI_GETSELECTIONS, 0, 0) as usize;
+        // 複数カーソルが終わった（Esc・クリック・タブ切替など）ら「N 箇所を選択中」を消す
+        if cursors <= 1 && self.multi_msg.get() {
+            self.multi_msg.set(false);
+            self.msg("");
+        }
         let sel = if cursors > 1 {
             format!("  カーソル {}", fmt_num(cursors))
         } else if b > a {
@@ -1132,6 +1149,7 @@ impl App {
             link: None,
             grep: None,
             title: None,
+            help: false,
             loaded_len: 0,
             margin_width: usize::MAX,
         };
@@ -1451,7 +1469,7 @@ impl App {
             tail.enc = enc;
         }
         Self::update_margin(t, cfg_lines);
-        t.hl.set_log_levels(&t.sci, log_levels && lang.is_log_like());
+        t.hl.set_log_levels(&t.sci, log_levels && t.log_colors());
         self.update_tab_label(idx);
         if idx == self.cur {
             self.update_title();
@@ -1621,6 +1639,8 @@ impl App {
         let idx = self.new_tab();
         let t = &mut self.tabs[idx];
         t.title = Some(title.into());
+        t.help = true;
+        t.hl.set_log_levels(&t.sci, false);
         lang::apply(&t.sci, lang, &self.palette);
         t.lang = lang;
         t.sci.load_bytes(text.replace('\n', "\r\n").as_bytes());
@@ -1760,7 +1780,7 @@ impl App {
                 let on = self.cfg.log_levels;
                 for t in &mut self.tabs {
                     let s = t.sci;
-                    t.hl.set_log_levels(&s, on && t.lang.is_log_like());
+                    t.hl.set_log_levels(&s, on && t.log_colors());
                 }
             }
             cmd::WRAP => {
@@ -2385,6 +2405,7 @@ impl App {
         sci.call(SCI_SCROLLCARET, 0, 0);
         let n = sci.call(SCI_GETSELECTIONS, 0, 0) as usize;
         self.msg(&format!("{} 箇所を選択中  入力すると全箇所に反映 / Ctrl+D で次を追加 / Esc で解除", fmt_num(n)));
+        self.multi_msg.set(n > 1);
         self.update_status();
     }
 
