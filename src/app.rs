@@ -180,6 +180,8 @@ pub struct Tab {
     /// 読み込み/保存時のファイルサイズ（tail の開始位置）
     pub loaded_len: u64,
     margin_width: usize,
+    /// 無題タブの通し番号（「無題1」「無題2」…）。作成時に空いている最小の番号を振る
+    untitled_no: usize,
 }
 
 impl Tab {
@@ -1161,6 +1163,10 @@ impl App {
         self.setup_sci(&sci);
         sci.call(SCI_SETEOLMODE, SC_EOL_CRLF as usize, 0);
         lang::apply(&sci, Lang::Text, &self.palette);
+        // 開いている無題タブが使っていない最小の番号
+        let untitled_no = (1..)
+            .find(|n| !self.tabs.iter().any(|t| t.path.is_none() && t.title.is_none() && t.untitled_no == *n))
+            .unwrap();
         let mut tab = Tab {
             id,
             sci,
@@ -1177,13 +1183,14 @@ impl App {
             help: false,
             loaded_len: 0,
             margin_width: usize::MAX,
+            untitled_no,
         };
         Self::update_margin(&mut tab, self.cfg.line_numbers);
         tab.hl.set_log_levels(&sci, self.cfg.log_levels);
         let idx = self.tabs.len();
         self.tabs.push(tab);
         unsafe {
-            let text = w("無題");
+            let text = w(&Self::tab_label(&self.tabs[idx]));
             let item = TCITEMW { mask: TCIF_TEXT | TCIF_PARAM, pszText: text.as_ptr() as *mut u16, lParam: id as LPARAM, ..std::mem::zeroed() };
             SendMessageW(self.tabctl, TCM_INSERTITEMW, idx, &item as *const _ as LPARAM);
         }
@@ -1221,12 +1228,16 @@ impl App {
         }
     }
 
+    fn untitled_name(t: &Tab) -> String {
+        format!("無題{}", t.untitled_no)
+    }
+
     fn tab_label(t: &Tab) -> String {
         let name = t
             .title
             .clone()
             .or_else(|| t.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "無題".into());
+            .unwrap_or_else(|| Self::untitled_name(t));
         let dirty = if t.sci.is_modified() { "*" } else { "" };
         let tail = if t.tail.is_some() { " ⟳" } else { "" };
         // 末尾の × は閉じるボタン。クリック判定は tab_proc で項目の右端 TAB_CLOSE_W px を見る
@@ -1261,7 +1272,12 @@ impl App {
             return;
         }
         let t = self.tab();
-        let name = t.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "無題".into());
+        let name = t
+            .path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .or_else(|| t.title.clone())
+            .unwrap_or_else(|| Self::untitled_name(t));
         let dirty = if t.sci.is_modified() { "*" } else { "" };
         util::set_window_text(self.hwnd, &format!("{dirty}{name} - {APP_NAME}"));
         self.update_tab_label(self.cur);
